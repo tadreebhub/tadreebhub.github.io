@@ -7,6 +7,18 @@
   var DB = function () { return window.TadreebDB; };
   var Auth = function () { return window.TadreebAuth; };
 
+  // تاريخ اليوم بتوقيت دمشق ككائن Date (منتصف الليل المحلي) — يُستخدم
+  // قيمة افتراضية «لليوم» بدل ساعة الجهاز. احتياطياً تاريخ الجهاز.
+  function todayDate() {
+    try {
+      if (window.TadreebTime && typeof window.TadreebTime.todayISO === 'function') {
+        var parsed = UI.parseDateStr(window.TadreebTime.todayISO());
+        if (parsed) return parsed;
+      }
+    } catch (e) { /* احتياطي أدناه */ }
+    return new Date();
+  }
+
   // ---------- المتجر: نسخة محلية من كل المجموعات ----------
   var COLLECTIONS = [
     'courses', 'sessions', 'meetings', 'trainees', 'trainers', 'directorates', 'groups', 'levels',
@@ -293,6 +305,11 @@
     UI.closeAllModals();
     document.getElementById('topbar-username').textContent = profile.username;
     document.getElementById('topbar-role').textContent = UI.roleLabel(profile.role);
+    // ساعة الترويسة: تاريخ اليوم + الوقت الحي بتوقيت دمشق (v2).
+    // العنصران يضيفهما التصميم؛ آمن عند غيابهما.
+    if (window.TadreebTime && typeof window.TadreebTime.startClock === 'function') {
+      window.TadreebTime.startClock(document.getElementById('topbar-date'), document.getElementById('topbar-clock'));
+    }
     document.getElementById('nav-admin').hidden = profile.role !== 'admin';
     document.getElementById('nav-settings').hidden = profile.role !== 'admin';
     showView('app');
@@ -954,7 +971,7 @@
   }
 
   function buildDayData(date, filters) {
-    var d = UI.parseDateStr(date) || new Date();
+    var d = UI.parseDateStr(date) || todayDate();
     var dateStr = UI.dateToStr(d);
     return {
       date: dateStr,
@@ -964,7 +981,7 @@
   }
 
   function buildRangeData(fromDate, toDate, filters) {
-    var from = UI.parseDateStr(fromDate) || new Date();
+    var from = UI.parseDateStr(fromDate) || todayDate();
     var to = UI.parseDateStr(toDate) || new Date(from.getTime());
     if (to < from) { var t = from; from = to; to = t; }
     // سقف النطاق 93 يوماً حتى لا تُبنى قوائم ضخمة من نطاق مفتوح.
@@ -1178,9 +1195,10 @@
     };
   }
 
-  // حدود أسبوع يبدأ الأحد وينتهي السبت (YYYY-MM-DD).
+  // حدود أسبوع يبدأ الأحد وينتهي السبت (YYYY-MM-DD)، من تاريخ اليوم
+  // بتوقيت دمشق.
   function weekBounds() {
-    var now = new Date();
+    var now = todayDate();
     var start = new Date(now.getTime());
     start.setDate(start.getDate() - start.getDay());
     var end = new Date(start.getTime());

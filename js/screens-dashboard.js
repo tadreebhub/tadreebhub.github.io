@@ -3,6 +3,9 @@
 (function () {
   'use strict';
 
+  // مؤقّت الساعة الحية (بتوقيت سوريا) — يُعاد ضبطه عند كل رسم.
+  var clockTimer = null;
+
   function weekBounds() {
     var now = new Date();
     var start = new Date(now.getTime());
@@ -39,8 +42,16 @@
     function showCard(key) { return cardPrefs[key] !== false; }
 
     var html = '';
+    // سطر التاريخ والوقت بتوقيت سوريا (آسيا/دمشق) — يستخدم
+    // window.TadreebTime عند توفره، وإلا التنسيق الحالي.
+    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+    var hasTadreebTime = !!(window.TadreebTime && typeof window.TadreebTime.formatDateLong === 'function');
+    var dateLine = hasTadreebTime ? window.TadreebTime.formatDateLong(new Date()) : UI.fmtDateFull(new Date());
+    var hasClock = hasTadreebTime && typeof window.TadreebTime.formatTime === 'function';
+    var timeLine = hasClock ? window.TadreebTime.formatTime(new Date()) : '';
     html += '<div class="page-head"><div><h1>لوحة المعلومات</h1>' +
-      '<div class="muted">' + UI.escapeHtml(UI.fmtDateFull(new Date())) + '</div></div>' +
+      '<div class="muted"><span id="dash-date">' + UI.escapeHtml(dateLine) + '</span>' +
+      (hasClock ? ' · <span id="dash-clock" class="ltr">' + UI.escapeHtml(timeLine) + '</span>' : '') + '</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="dash-export-btn">تصدير إكسل ↓</button></div></div>';
 
     if (showCard('stats')) {
@@ -52,11 +63,10 @@
         '</div>';
     }
 
-    // جلسات اليوم + ملخص الحضور هذا الأسبوع (داخل صف .cols واحد؛
-    // يُبنى الصف فقط عند ظهور إحدى البطاقتين على الأقل).
+    // جلسات اليوم + ملخص الحضور هذا الأسبوع (بطاقتان متتاليتان).
     var todayHtml = '';
     if (showCard('today')) {
-      todayHtml += '<div class="card"><h2>جلسات اليوم</h2>';
+      todayHtml += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">جلسات اليوم</h2></div>';
       if (!todaySessions.length) {
         todayHtml += UI.emptyState('لا جلسات اليوم', 'لا توجد جلسات مجدولة لهذا اليوم.');
       } else {
@@ -77,14 +87,14 @@
     // ملخص الحضور هذا الأسبوع
     var weekHtml = '';
     if (showCard('weekAttendance')) {
-      weekHtml += '<div class="card"><h2>ملخص الحضور هذا الأسبوع</h2><div id="dash-week-attendance">' +
+      weekHtml += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">ملخص الحضور هذا الأسبوع</h2></div><div id="dash-week-attendance">' +
         UI.loadingState('جارٍ تحميل الحضور…') + '</div></div>';
     }
-    if (todayHtml || weekHtml) html += '<div class="cols">' + todayHtml + weekHtml + '</div>';
+    html += todayHtml + weekHtml;
 
     // الجلسات القادمة
     if (showCard('upcoming')) {
-      html += '<div class="card"><h2>الجلسات القادمة</h2>';
+      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">الجلسات القادمة</h2></div>';
       if (!upcoming.length) {
         html += UI.emptyState('لا جلسات قادمة', 'لا توجد جلسات مجدولة في الأيام القادمة.');
       } else {
@@ -106,16 +116,16 @@
 
     // تقدم الدورات النشطة
     if (showCard('progress')) {
-      html += '<div class="card"><h2>تقدم الدورات النشطة</h2>';
+      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">تقدم الدورات النشطة</h2></div>';
       if (!activeCourses.length) {
         html += UI.emptyState('لا دورات نشطة', 'أنشئ دورة جديدة من شاشة الدورات لتبدأ.', App.canWrite() ? 'دورة جديدة' : null, 'dash-new-course');
       } else {
         activeCourses.forEach(function (c) {
           var prog = App.courseProgress(c.id);
-          html += '<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:10px"><span class="track-name" data-course-open="' +
+          html += '<div style="margin-bottom:14px"><div class="section-title-row"><span class="track-name" data-course-open="' +
             UI.escapeHtml(c.id) + '">' + UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted">' +
             prog.done + ' من ' + prog.total + ' جلسة</span></div>' +
-            '<div class="progress" style="margin-top:6px"><i style="width:' + prog.percent + '%"></i></div></div>';
+            '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
         });
       }
       html += '</div>';
@@ -123,7 +133,7 @@
 
     // متابعة الدورات
     if (showCard('tracker')) {
-      html += '<div class="card"><h2>متابعة الدورات</h2>';
+      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">متابعة الدورات</h2></div>';
     if (!activeCourses.length) {
       html += '<div class="muted">لا دورات نشطة للمتابعة.</div>';
     } else {
@@ -143,6 +153,15 @@
     }
 
     container.innerHTML = html;
+
+    // الساعة الحية بتوقيت سوريا — تُحدَّث كل ثانية ما دامت الشاشة معروضة.
+    if (hasClock) {
+      clockTimer = setInterval(function () {
+        var clockEl = document.getElementById('dash-clock');
+        if (!clockEl) { clearInterval(clockTimer); clockTimer = null; return; }
+        clockEl.textContent = window.TadreebTime.formatTime(new Date());
+      }, 1000);
+    }
 
     // ربط الأحداث
     container.querySelectorAll('[data-session-open]').forEach(function (el) {
@@ -224,12 +243,12 @@
         }
         var pct = function (n) { return Math.round((n / total) * 100); };
         box.innerHTML =
-          '<div>موجود · ' + counts.present + ' <span class="muted">(' + pct(counts.present) + '%)</span></div>' +
-          '<div class="mini-bar"><i style="width:' + pct(counts.present) + '%;background:#2E7D32"></i></div>' +
-          '<div>غائب · ' + counts.absent + ' <span class="muted">(' + pct(counts.absent) + '%)</span></div>' +
-          '<div class="mini-bar"><i style="width:' + pct(counts.absent) + '%;background:#C62828"></i></div>' +
-          '<div>معتذر · ' + counts.excused + ' <span class="muted">(' + pct(counts.excused) + '%)</span></div>' +
-          '<div class="mini-bar"><i style="width:' + pct(counts.excused) + '%;background:#B45309"></i></div>' +
+          '<div class="prog-row"><span>موجود · ' + counts.present + '</span><span class="muted">(' + pct(counts.present) + '%)</span></div>' +
+          '<div class="progress"><i style="width:' + pct(counts.present) + '%;background:#2E7D32"></i></div>' +
+          '<div class="prog-row"><span>غائب · ' + counts.absent + '</span><span class="muted">(' + pct(counts.absent) + '%)</span></div>' +
+          '<div class="progress"><i style="width:' + pct(counts.absent) + '%;background:#C62828"></i></div>' +
+          '<div class="prog-row"><span>معتذر · ' + counts.excused + '</span><span class="muted">(' + pct(counts.excused) + '%)</span></div>' +
+          '<div class="progress"><i style="width:' + pct(counts.excused) + '%;background:#B45309"></i></div>' +
           '<div class="muted">إجمالي الحضور المسجل هذا الأسبوع: ' + total + '</div>';
       });
     }

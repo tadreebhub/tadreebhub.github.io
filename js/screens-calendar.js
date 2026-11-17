@@ -285,7 +285,7 @@
       '<span><span class="dot" style="background:#B45309"></span>عطلة</span>' +
       '</div>';
 
-    html += '<div class="card"><div class="table-wrap"><table><thead><tr><th>الفترة</th>';
+    html += '<div class="card-white"><div class="table-wrap"><table><thead><tr><th>الفترة</th>';
     days.forEach(function (day) {
       var d = UI.parseDateStr(day.date);
       html += '<th>' + UI.escapeHtml(UI.WEEKDAYS[d.getDay()]) + ' ' + d.getDate() +
@@ -367,10 +367,10 @@
         return '<option value="' + UI.escapeHtml(it.id) + '"' + (it.id === current ? ' selected' : '') + '>' +
           UI.escapeHtml(it.name) + '</option>';
       }).join('');
-      return '<div style="flex:1;min-width:160px"><label style="display:block;font-size:13px;margin-bottom:4px">' + label + '</label>' +
-        '<select id="' + id + '" style="width:100%;padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px">' + opts + '</select></div>';
+      return '<label class="muted" for="' + id + '">' + label + '</label>' +
+        '<select class="input" id="' + id + '">' + opts + '</select>';
     }
-    return '<div class="card" style="padding:14px 16px;display:flex;gap:12px;flex-wrap:wrap">' +
+    return '<div class="toolbar">' +
       sel('cal-filter-course', 'الدورة', courses, filterState.courseId) +
       sel('cal-filter-hall', 'القاعة', halls, filterState.hallId) +
       sel('cal-filter-trainer', 'المدرب', trainers, filterState.trainerId) +
@@ -400,15 +400,14 @@
     var data = App.buildDayData(state.dayDate, filterState);
     var entries = data.days[0].sessions;
 
-    var html = '<div class="card" style="padding:14px 16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">' +
-      '<strong>' + UI.escapeHtml(UI.fmtDateFull(state.dayDate)) + '</strong>' +
-      (state.dayDate === today ? ' <span class="pill pill-navy">اليوم</span>' : '') +
-      '<label class="muted" style="margin:0">اختر يوماً:</label>' +
-      '<input type="date" id="cal-day-input" value="' + UI.escapeHtml(state.dayDate) + '" style="padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px">' +
+    var html = '<div class="toolbar"><strong>' + UI.escapeHtml(UI.fmtDateFull(state.dayDate)) + '</strong>' +
+      (state.dayDate === today ? '<span class="pill pill-navy">اليوم</span>' : '') +
+      '<label class="muted" for="cal-day-input">اختر يوماً:</label>' +
+      '<input type="date" id="cal-day-input" class="input" value="' + UI.escapeHtml(state.dayDate) + '">' +
       '</div>';
 
     if (holidays[state.dayDate]) {
-      html += '<div class="card"><div class="hl hl-holiday">عطلة: ' + UI.escapeHtml(holidays[state.dayDate]) + '</div></div>';
+      html += '<div class="card-white"><div class="hl hl-holiday">عطلة: ' + UI.escapeHtml(holidays[state.dayDate]) + '</div></div>';
     }
 
     html += '<div class="legend">' +
@@ -418,7 +417,7 @@
       '<span><span class="dot" style="background:#B45309"></span>عطلة</span>' +
       '</div>';
 
-    html += '<div class="card"><div class="table-wrap"><table><thead><tr><th>الفترة</th><th>الجلسات والاجتماعات</th></tr></thead><tbody>';
+    html += '<div class="card-white"><div class="table-wrap"><table><thead><tr><th>الفترة</th><th>الجلسات والاجتماعات</th></tr></thead><tbody>';
     if (!periods.length) {
       html += '<tr><td colspan="2"><div class="muted">لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة.</div></td></tr>';
     }
@@ -453,16 +452,16 @@
     Store.getAll('holidays').forEach(function (h) { holidays[h.date] = h.name; });
     var data = App.buildRangeData(state.rangeFrom, state.rangeTo, filterState);
 
-    var html = '<div class="card" style="padding:14px 16px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">' +
-      '<div><label style="display:block;font-size:13px;margin-bottom:4px">من</label>' +
-      '<input type="date" id="cal-range-from" value="' + UI.escapeHtml(state.rangeFrom) + '" style="padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px"></div>' +
-      '<div><label style="display:block;font-size:13px;margin-bottom:4px">إلى</label>' +
-      '<input type="date" id="cal-range-to" value="' + UI.escapeHtml(state.rangeTo) + '" style="padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px"></div>' +
+    var html = '<div class="toolbar">' +
+      '<label class="muted" for="cal-range-from">من</label>' +
+      '<input type="date" id="cal-range-from" class="input" value="' + UI.escapeHtml(state.rangeFrom) + '">' +
+      '<label class="muted" for="cal-range-to">إلى</label>' +
+      '<input type="date" id="cal-range-to" class="input" value="' + UI.escapeHtml(state.rangeTo) + '">' +
       '<button class="btn btn-sm" type="button" id="cal-range-show">عرض</button>' +
       '<span class="muted">الحد الأقصى للنطاق 93 يوماً.</span></div>';
 
     var shown = 0;
-    html += '<div class="card">';
+    html += '<div class="card-white">';
     data.days.forEach(function (day) {
       var holidayName = holidays[day.date];
       if (!day.sessions.length && !holidayName) return;
@@ -483,7 +482,7 @@
       });
       html += '</div></div>';
     });
-    if (!shown) html += '<div class="muted">لا جلسات في هذا النطاق.</div>';
+    if (!shown) html += UI.emptyState('لا جلسات في هذا النطاق.');
     html += '</div>';
     return html;
   }
@@ -500,7 +499,7 @@
     var holidays = {};
     Store.getAll('holidays').forEach(function (h) { holidays[h.date] = h.name; });
 
-    var html = '<div class="card"><div class="section-title-row"><h2 style="margin:0">' +
+    var html = '<div class="card-white"><div class="section-title-row"><h2>' +
       UI.escapeHtml(UI.fmtMonthYear(year, month)) + '</h2></div>' +
       '<div class="legend"><span><span class="dot" style="background:#2F6F8F"></span>اليوم</span>' +
       '<span><span class="dot" style="background:#6D28D9"></span>اجتماع عارض</span>' +

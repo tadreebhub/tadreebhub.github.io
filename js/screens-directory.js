@@ -23,10 +23,10 @@
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="dir-export-btn">تصدير إكسل ↓</button></div></div>';
 
     // المدربون — جدول بيانات
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">المدربون (' + trainers.length + ')</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>المدربون (' + trainers.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-sm" type="button" data-add="trainer">إضافة مدرب</button>' : '') + '</div>';
     if (!trainers.length) {
-      html += '<div class="muted">لا مدربين مسجلين.</div>';
+      html += UI.emptyState('لا مدربين مسجلين');
     } else {
       html += '<div class="table-wrap"><table><thead><tr><th>المعرّف</th><th>الاسم</th><th>التخصص</th><th>رقم الهاتف</th><th>عدد الدورات</th><th>إجراءات</th></tr></thead><tbody>';
       trainers.forEach(function (t) {
@@ -42,10 +42,10 @@
     html += '</div>';
 
     // المديريات — جدول بيانات
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">المديريات (' + directorates.length + ')</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>المديريات (' + directorates.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-sm" type="button" data-add="directorate">إضافة مديرية</button>' : '') + '</div>';
     if (!directorates.length) {
-      html += '<div class="muted">لا مديريات مسجلة.</div>';
+      html += UI.emptyState('لا مديريات مسجلة');
     } else {
       html += '<div class="table-wrap"><table><thead><tr><th>المعرّف</th><th>الاسم</th><th>عدد المجموعات</th><th>عدد الدورات</th><th>عدد المتدربين</th><th>إجراءات</th></tr></thead><tbody>';
       directorates.forEach(function (d) {
@@ -65,10 +65,10 @@
     html += '</div>';
 
     // المجموعات التدريبية — جدول بيانات
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">المجموعات التدريبية (' + groups.length + ')</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>المجموعات التدريبية (' + groups.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-sm" type="button" data-add="group">إضافة مجموعة</button>' : '') + '</div>';
     if (!groups.length) {
-      html += '<div class="muted">لا مجموعات تدريبية مسجلة — المجموعة تنتمي إلى مديرية وتُعيَّن لدورة.</div>';
+      html += UI.emptyState('لا مجموعات تدريبية مسجلة', 'المجموعة تنتمي إلى مديرية وتُعيَّن لدورة.');
     } else {
       html += '<div class="table-wrap"><table><thead><tr><th>المعرّف</th><th>الاسم</th><th>المديرية</th><th>عدد الأعضاء</th><th>عدد الدورات</th><th>إجراءات</th></tr></thead><tbody>';
       groups.forEach(function (g) {
@@ -84,9 +84,9 @@
     html += '</div>';
 
     // القاعات — قائمة بطاقات كما هي
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">القاعات (' + halls.length + ')</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>القاعات (' + halls.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-outline btn-sm" type="button" data-add="hall">إضافة قاعة</button>' : '') + '</div>';
-    if (!halls.length) html += '<div class="muted">لا قاعات مسجلة.</div>';
+    if (!halls.length) html += UI.emptyState('لا قاعات مسجلة');
     halls.forEach(function (h) {
       var todayCount = Store.getAll('sessions').filter(function (s) { return s.hallId === h.id && s.date === UI.todayStr(); }).length;
       html += '<div class="person"><div class="p-name">' + UI.escapeHtml(h.name) + ' <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(h, 'halls')) + '</span></div>' +
@@ -97,7 +97,7 @@
     html += '</div>';
 
     // المتدربون
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">المتدربون (' + trainees.length + ')</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>المتدربون (' + trainees.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-sm" type="button" data-add="trainee">إضافة متدرب</button>' : '') + '</div>';
     if (!trainees.length) {
       html += UI.emptyState('لا متدربين مسجلين', 'أضف المتدربين هنا أو أثناء إنشاء دورة جديدة.', canWrite ? 'إضافة متدرب' : null, 'dir-empty-trainee');

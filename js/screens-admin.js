@@ -14,7 +14,7 @@
       '<div class="muted">إدارة حسابات المستخدمين وسجل التدقيق والنسخ الاحتياطي</div></div></div>';
 
     // إنشاء حساب
-    html += '<div class="card"><h2>إنشاء حساب جديد</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>إنشاء حساب جديد</h2></div>' +
       '<form id="admin-user-form" novalidate><div class="form-grid">' +
       '<div class="field"><label>اسم المستخدم *</label><input type="text" name="username" required placeholder="مثال: coordinator1" dir="ltr" style="text-align:right">' +
       '<div class="field-hint">من 3 إلى 30 حرفاً: أحرف لاتينية وأرقام ونقطة وشرطة سفلية وشرطة فقط.</div></div>' +
@@ -28,23 +28,23 @@
       '<button class="btn" type="submit" id="admin-user-submit">إنشاء الحساب</button></form></div>';
 
     // جدول المستخدمين
-    html += '<div class="card"><h2>الحسابات</h2><div id="admin-users-box">' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>الحسابات</h2></div><div id="admin-users-box">' +
       UI.loadingState('جارٍ تحميل الحسابات…') + '</div></div>';
 
     // سجل التدقيق
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">سجل التدقيق</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>سجل التدقيق</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="admin-audit-refresh">تحديث</button></div>' +
       '<div id="admin-audit-box">' + UI.loadingState('جارٍ تحميل سجل التدقيق…') + '</div></div>';
 
     // محاولات دخول فاشلة أخيرة (بصمة اسم المستخدم فقط — بلا أسماء)
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">محاولات دخول فاشلة أخيرة</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>محاولات دخول فاشلة أخيرة</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="admin-attempts-refresh">تحديث</button></div>' +
       '<div id="admin-attempts-box">' + UI.loadingState('جارٍ تحميل محاولات الدخول…') + '</div></div>';
 
     // النسخ الاحتياطي
-    html += '<div class="card"><h2>النسخ الاحتياطي والملخص</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>النسخ الاحتياطي والملخص</h2></div>' +
       '<p class="muted">نزّل نسخة كاملة من كل بيانات المنصة في ملف إكسل واحد، أو ملخصاً موجزاً بحالة المنصة.</p>' +
-      '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+      '<div class="toolbar">' +
       '<button class="btn" type="button" id="admin-backup-btn">تصدير نسخة احتياطية كاملة ↓</button>' +
       '<button class="btn btn-outline" type="button" id="admin-summary-btn">تصدير ملخص المنصة ↓</button>' +
       '</div></div>';
@@ -144,7 +144,7 @@
       users.forEach(function (u) {
         var isMe = me && u.uid === me.uid;
         html += '<tr><td><strong>' + UI.escapeHtml(u.username) + '</strong>' + (isMe ? ' <span class="pill pill-navy">أنت</span>' : '') + '</td>' +
-          '<td><select class="input" data-role-select="' + UI.escapeHtml(u.uid) + '" style="padding:6px 8px"' + (isMe ? ' disabled' : '') + '>' +
+          '<td><select class="input" data-role-select="' + UI.escapeHtml(u.uid) + '"' + (isMe ? ' disabled' : '') + '>' +
           ['admin', 'editor', 'viewer'].map(function (r) {
             return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + UI.roleLabel(r) + '</option>';
           }).join('') + '</select></td>' +
@@ -368,7 +368,7 @@
       '<div class="muted">إعدادات المنصة العامة — الفترات والعطل وفئات الميزانية ومستويات الدورات — وإدارة حسابات المستخدمين</div></div></div>';
 
     // 1 — الفترات التدريبية
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">الفترات التدريبية</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>الفترات التدريبية</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-period"' + (periods.length >= 4 ? ' disabled title="الحد الأقصى 4 فترات"' : '') + '>إضافة فترة</button>' +
       '</div><div class="period-grid">';
     if (!periods.length) html += '<div class="muted">لا فترات معرّفة.</div>';
@@ -382,7 +382,7 @@
     html += '</div><div class="muted">يمكن تعديل أوقات الفترات من هنا، وإضافة فترة رابعة عند الحاجة (الحد الأقصى 4 فترات).</div></div>';
 
     // 2 — العطل
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">العطل</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>العطل</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-holiday">إضافة عطلة</button>' +
       '</div>';
     if (!holidays.length) {
@@ -398,7 +398,7 @@
     html += '</div>';
 
     // 3 — فئات الميزانية
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">فئات الميزانية</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>فئات الميزانية</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-category">إضافة فئة</button>' +
       '</div><div class="chips">';
     if (!categories.length) html += '<span class="muted">لا فئات معرّفة.</span>';
@@ -411,7 +411,7 @@
     html += '</div><div class="muted" style="margin-top:10px">تظهر هذه الفئات في نموذج إضافة المصروف لكل دورة.</div></div>';
 
     // 4 — مستويات الدورات (الافتراضية للعرض فقط + المخصصة قابلة للإدارة)
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">مستويات الدورات</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>مستويات الدورات</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-level">إضافة مستوى</button>' +
       '</div><div class="chips">';
     Object.keys(App.LEVEL_LABELS).forEach(function (key) {
@@ -428,12 +428,12 @@
     html += '</div><div class="muted" style="margin-top:10px">تظهر المستويات المخصصة في نموذج الدورة. لا يمكن حذف مستوى معيّن في دورة.</div></div>';
 
     // 5 — إدارة المستخدمين
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">إدارة المستخدمين</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>إدارة المستخدمين</h2>' +
       '<button class="btn btn-sm" type="button" id="settings-add-user">إضافة مستخدم</button></div>' +
       '<div id="settings-users-box">' + UI.loadingState('جارٍ تحميل الحسابات…') + '</div></div>';
 
     // 6 — الصلاحيات (عرض فقط)
-    html += '<div class="card"><h2>الصلاحيات</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>الصلاحيات</h2></div>' +
       '<p class="muted" style="margin-top:0">الصلاحيات ثابتة حسب الدور — تُدار الأدوار من قسم إدارة المستخدمين أعلاه، ولا يمكن تخصيص صلاحية لمستخدم بمفرده.</p>' +
       permissionsMatrixHtml() + '</div>';
 
@@ -441,15 +441,15 @@
     var calViewPref = UI.getSetting('calendarView', 'week');
     var dashCardsPref = UI.getSetting('dashboardCards', UI.SETTING_DEFAULTS.dashboardCards);
     var densityPref = UI.getSetting('tableDensity', 'comfortable');
-    html += '<div class="card"><h2>إدارة العرض</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>إدارة العرض</h2></div>' +
       '<p class="muted" style="margin-top:0">إعدادات العرض محفوظة على هذا الجهاز فقط.</p>' +
       '<div class="form-grid">' +
-      '<div class="field"><label>العرض الافتراضي للتقويم</label><select id="settings-calendar-view">' +
+      '<div class="field"><label>العرض الافتراضي للتقويم</label><select class="input" id="settings-calendar-view">' +
       '<option value="day"' + (calViewPref === 'day' ? ' selected' : '') + '>يوم</option>' +
       '<option value="week"' + (calViewPref === 'week' ? ' selected' : '') + '>أسبوع</option>' +
       '<option value="month"' + (calViewPref === 'month' ? ' selected' : '') + '>شهر</option>' +
       '</select></div>' +
-      '<div class="field"><label>كثافة الجداول</label><select id="settings-density">' +
+      '<div class="field"><label>كثافة الجداول</label><select class="input" id="settings-density">' +
       '<option value="comfortable"' + (densityPref !== 'compact' ? ' selected' : '') + '>مريحة</option>' +
       '<option value="compact"' + (densityPref === 'compact' ? ' selected' : '') + '>مدمجة</option>' +
       '</select></div>' +
@@ -464,15 +464,15 @@
 
     // 8 — إدارة التنسيق (محفوظة على هذا الجهاز فقط)
     var fmtPref = UI.getSetting('exportFmt', UI.SETTING_DEFAULTS.exportFmt);
-    html += '<div class="card"><h2>إدارة التنسيق</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>إدارة التنسيق</h2></div>' +
       '<p class="muted" style="margin-top:0">تنسيق ملفات إكسل المصدَّرة — محفوظ على هذا الجهاز فقط.</p>' +
       '<div class="form-grid">' +
-      '<div class="field"><label>تنسيق التاريخ</label><select id="settings-export-date">' +
+      '<div class="field"><label>تنسيق التاريخ</label><select class="input" id="settings-export-date">' +
       '<option value="iso"' + (fmtPref.dateFormat === 'iso' ? ' selected' : '') + '>2026-11-17</option>' +
       '<option value="dmy"' + (fmtPref.dateFormat === 'dmy' ? ' selected' : '') + '>17/11/2026</option>' +
       '<option value="long"' + (fmtPref.dateFormat === 'long' ? ' selected' : '') + '>17 تشرين الثاني 2026</option>' +
       '</select></div>' +
-      '<div class="field"><label>أرقام التصدير</label><select id="settings-export-numbers">' +
+      '<div class="field"><label>أرقام التصدير</label><select class="input" id="settings-export-numbers">' +
       '<option value="western"' + (fmtPref.numbers !== 'eastern' ? ' selected' : '') + '>غربية 0123</option>' +
       '<option value="eastern"' + (fmtPref.numbers === 'eastern' ? ' selected' : '') + '>مشرقية ٠١٢٣</option>' +
       '</select></div>' +
@@ -482,8 +482,8 @@
       '</div>';
 
     // 9 — حول المنصة
-    html += '<div class="card"><h2>حول المنصة</h2>' +
-      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 1.1</p>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>حول المنصة</h2></div>' +
+      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.0</p>' +
       '<div class="stats" style="margin-bottom:0">' +
       '<div class="stat"><div class="stat-num" id="settings-count-users">…</div><div class="stat-label">عدد المستخدمين</div></div>' +
       '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('courses').length) + '</div><div class="stat-label">عدد الدورات</div></div>' +
@@ -916,7 +916,7 @@
         var isMe = me && u.uid === me.uid;
         var disabled = u.disabled === true;
         html += '<tr><td><strong>' + UI.escapeHtml(u.username) + '</strong>' + (isMe ? ' <span class="pill pill-navy">أنت</span>' : '') + '</td>' +
-          '<td><select class="input" data-settings-role="' + UI.escapeHtml(u.uid) + '" style="padding:6px 8px"' + (isMe ? ' disabled title="لا يمكنك تغيير دور حسابك الحالي"' : '') + '>' +
+          '<td><select class="input" data-settings-role="' + UI.escapeHtml(u.uid) + '"' + (isMe ? ' disabled title="لا يمكنك تغيير دور حسابك الحالي"' : '') + '>' +
           ['admin', 'editor', 'viewer'].map(function (r) {
             return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + UI.roleLabel(r) + '</option>';
           }).join('') + '</select></td>' +

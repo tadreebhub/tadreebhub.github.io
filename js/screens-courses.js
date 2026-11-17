@@ -41,12 +41,12 @@
     html += '</div></div>';
 
     var chips = [['all', 'الكل'], ['completed', 'مكتملة'], ['in-progress', 'جارية'], ['cancelled', 'ملغاة'], ['paused', 'متوقفة']];
-    html += '<div class="chips">';
+    html += '<div class="toolbar"><div class="chips">';
     chips.forEach(function (chip) {
       html += '<button class="chip' + (currentFilter === chip[0] ? ' active' : '') + '" type="button" data-filter="' +
         chip[0] + '">' + chip[1] + '</button>';
     });
-    html += '<select id="courses-level-filter" aria-label="فلترة حسب المستوى" style="margin-inline-start:8px">' +
+    html += '</div><select class="input" id="courses-level-filter" aria-label="فلترة حسب المستوى">' +
       '<option value="all"' + (currentLevelFilter === 'all' ? ' selected' : '') + '>كل المستويات</option>' +
       levelFilterOptionsHtml() + '</select>';
     html += '</div>';
@@ -546,9 +546,9 @@
         var cur = dayPlanState[d] || { periodId: mainPeriodSel ? mainPeriodSel.value : '', hallId: null };
         html += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' +
           '<span style="min-width:64px;font-weight:600">' + UI.escapeHtml(UI.WEEKDAYS[d]) + '</span>' +
-          '<select data-dayplan-period="' + d + '" style="flex:1;width:auto;min-width:0;padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px">' +
+          '<select class="input" data-dayplan-period="' + d + '" style="flex:1;width:auto;min-width:0">' +
           periodOptionsHtml(cur.periodId || (mainPeriodSel ? mainPeriodSel.value : null)) + '</select>' +
-          '<select data-dayplan-hall="' + d + '" style="flex:1;width:auto;min-width:0;padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px">' +
+          '<select class="input" data-dayplan-hall="' + d + '" style="flex:1;width:auto;min-width:0">' +
           hallOptionsHtml(cur.hallId) + '</select></div>';
       });
       dayPlanEl.innerHTML = html;
@@ -914,9 +914,9 @@
       '</div>';
 
     // التقدم
-    html += '<div class="card"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><strong>التقدم في الدورة</strong>' +
+    html += '<div class="card"><div class="section-title-row"><strong>التقدم في الدورة</strong>' +
       '<span class="muted">' + prog.done + ' جلسات مكتملة من ' + prog.total + ' · المتبقي ' + prog.remaining + ' جلسة</span></div>' +
-      '<div class="progress" style="margin-top:12px;height:12px"><i style="width:' + prog.percent + '%"></i></div></div>';
+      '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
 
     // جدول الجلسات
     html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">جدول الجلسات</h2><div class="head-actions">';
@@ -986,7 +986,7 @@
           '<td>' + UI.escapeHtml(App.directorateName(t.directorateId) || '—') + '</td>' +
           '<td><span class="ltr">' + UI.escapeHtml(t.phone || '—') + '</span></td>' +
           '<td>' + (canWrite ?
-            '<select class="input" data-trainee-status="' + UI.escapeHtml(t.id) + '" style="padding:6px 8px">' +
+            '<select class="input" data-trainee-status="' + UI.escapeHtml(t.id) + '">' +
             '<option value="">بلا حالة</option>' +
             Object.keys(UI.TRAINEE_STATUS_LABELS).map(function (k) {
               return '<option value="' + k + '"' + (t.status === k ? ' selected' : '') + '>' + UI.TRAINEE_STATUS_LABELS[k] + '</option>';
@@ -1014,7 +1014,7 @@
     html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">ميزانية الدورة</h2>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="cd-budget-export-btn">تصدير الميزانية ↓</button>' +
       '<button class="btn btn-outline btn-sm" type="button" id="cd-closing-btn">تقرير ختامي</button></div></div>' +
-      '<div class="period-grid">' +
+      '<div class="meta-grid">' +
       '<div class="meta-box"><div class="k">الميزانية المعتمدة</div><div class="v">' + UI.fmtMoney(budget.allocated) + '</div></div>' +
       '<div class="meta-box"><div class="k">إجمالي المصاريف</div><div class="v">' + UI.fmtMoney(budget.totalSpent) + '</div></div>' +
       '<div class="meta-box"><div class="k">المتبقي</div><div class="v">' + UI.fmtMoney(budget.remaining) + '</div></div>' +
@@ -1037,9 +1037,9 @@
       }
     }
     html += '</tbody></table></div>' +
-      '<div style="margin-top:14px"><div style="display:flex;justify-content:space-between"><span>تم صرف ' + spentPct + '% من الميزانية</span>' +
+      '<div style="margin-top:14px"><div class="section-title-row"><span>تم صرف ' + spentPct + '% من الميزانية</span>' +
       '<span class="muted">المتبقي: ' + UI.fmtMoney(budget.remaining) + '</span></div>' +
-      '<div class="progress" style="margin-top:6px;height:12px"><i style="width:' + spentPct + '%"></i></div></div>';
+      '<div class="progress"><i style="width:' + spentPct + '%"></i></div></div>';
 
     // تفاصيل المصاريف
     html += '<h3 style="margin-top:22px">تفاصيل المصاريف</h3>';
