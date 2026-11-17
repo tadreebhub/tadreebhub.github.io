@@ -12,9 +12,12 @@
     USERS: 'users',
     COURSES: 'courses',
     SESSIONS: 'sessions',
+    MEETINGS: 'meetings',
     TRAINEES: 'trainees',
     TRAINERS: 'trainers',
     DIRECTORATES: 'directorates',
+    GROUPS: 'groups',
+    LEVELS: 'levels',
     HALLS: 'halls',
     PERIODS: 'periods',
     HOLIDAYS: 'holidays',
@@ -29,11 +32,13 @@
   // (موجود/غائب/معتذر) — معتذر مع مبرر في حقل note.
   var TRAINEE_STATUSES = ['passed', 'absent', 'never-attended', 'cancelled'];
   var ATTENDANCE_STATUSES = ['present', 'absent', 'excused'];
-  var SESSION_STATES = ['scheduled', 'done', 'cancelled', 'trainer-absent'];
-  var COURSE_STATUSES = ['active', 'completed', 'cancelled'];
+  var SESSION_STATES = ['scheduled', 'done', 'cancelled', 'trainer-absent', 'holiday'];
+  // حالات الاجتماع العارض: مجدول يشغل القاعة، ملغى يحرّرها.
+  var MEETING_STATUSES = ['scheduled', 'cancelled'];
+  var COURSE_STATUSES = ['active', 'completed', 'cancelled', 'paused'];
 
   // تسميات عربية لسجل التدقيق (القيم الإنكليزية لا تظهر للمستخدم أبداً).
-  var SESSION_STATE_LABELS = { scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب' };
+  var SESSION_STATE_LABELS = { scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب', holiday: 'عطلة' };
   var ATTENDANCE_LABELS = { present: 'موجود', absent: 'غائب', excused: 'معتذر' };
   var TRAINEE_STATUS_LABELS = { passed: 'ناجح في الدورة', absent: 'غائب', 'never-attended': 'لم يحضر', cancelled: 'ملغى الاسم' };
 
@@ -285,7 +290,10 @@
         db().collection(COLLECTIONS.SESSIONS).where('courseId', '==', courseId).get(),
         db().collection(COLLECTIONS.SESSIONS)
           .where('date', '>=', startS).where('date', '<=', endS).get(),
-        list(COLLECTIONS.HALLS, 'name')
+        list(COLLECTIONS.HALLS, 'name'),
+        // الاجتماعات العارضة المجدولة في النطاق: تشغل قاعاتها كالجلسات.
+        db().collection(COLLECTIONS.MEETINGS)
+          .where('date', '>=', startS).where('date', '<=', endS).get()
       ]);
     }).then(function (results) {
       holidaysSet = new Set(results[0].map(function (h) { return h.date; }));
@@ -299,9 +307,20 @@
       results[2].forEach(function (doc) {
         var s = doc.data();
         if (!s.hallId) return;
+        // الملغاة والعطلة لا تشغلان القاعة (كما في checkHallAvailability).
+        if (s.state === 'cancelled' || s.state === 'holiday') return;
         var key = s.date + '|' + s.periodId;
         if (!occupied[key]) occupied[key] = new Set();
         occupied[key].add(s.hallId);
+      });
+      // الاجتماعات العارضة المجدولة تشغل قاعاتها؛ الملغاة لا تشغلها.
+      results[4].forEach(function (doc) {
+        var m = doc.data();
+        if (!m.hallId) return;
+        if (m.status === 'cancelled') return;
+        var mkey = m.date + '|' + m.periodId;
+        if (!occupied[mkey]) occupied[mkey] = new Set();
+        occupied[mkey].add(m.hallId);
       });
       halls = results[3];
 
@@ -320,12 +339,31 @@
         if (existingDates.has(ds)) continue; // جلسة موجودة — لا تكرار
         if (holidaysSet.has(ds)) { skippedHolidays++; continue; }
 
-        // أول قاعة حرة في ذلك التاريخ والفترة.
+        // الخطة الأسبوعية (v1.1): فترة وقاعة لكل يوم على حدة؛ الدورات
+        // القديمة بلا dayPlan تأخذ الفترة الرئيسية وأول قاعة حرة كما قبل.
+        var plan = (course.dayPlan && course.dayPlan[d.getDay()]) || null;
+        var periodId = plan && plan.periodId ? plan.periodId : course.periodId;
         var hallId = null;
-        var key = ds + '|' + course.periodId;
+        var key = ds + '|' + periodId;
         var busy = occupied[key] || new Set();
-        for (var h = 0; h < halls.length; h++) {
-          if (!busy.has(halls[h].id)) { hallId = halls[h].id; break; }
+        if (plan && plan.hallId) {
+          // قاعة مطلوبة صراحةً: تُستخدم إن كانت موجودة وحرة فقط — لا بديل
+          // صامت عنها، والجلسة بلا قاعة تظهر في نافذة النتيجة للتعيين
+          // اليدوي. أما إن حُذفت القاعة المطلوبة لاحقاً فالخيار غير قابل
+          // للتنفيذ أصلاً، فنعود إلى أول قاعة حرة.
+          var hallExists = halls.some(function (hh) { return hh.id === plan.hallId; });
+          if (!hallExists) {
+            for (var hi = 0; hi < halls.length; hi++) {
+              if (!busy.has(halls[hi].id)) { hallId = halls[hi].id; break; }
+            }
+          } else if (!busy.has(plan.hallId)) {
+            hallId = plan.hallId;
+          }
+        } else {
+          // أول قاعة حرة في ذلك التاريخ والفترة.
+          for (var h = 0; h < halls.length; h++) {
+            if (!busy.has(halls[h].id)) { hallId = halls[h].id; break; }
+          }
         }
         if (hallId) {
           if (!occupied[key]) occupied[key] = new Set();
@@ -338,7 +376,7 @@
         batch.set(ref, {
           courseId: courseId,
           date: ds,
-          periodId: course.periodId,
+          periodId: periodId,
           hallId: hallId,
           state: 'scheduled',
           note: '',
@@ -362,17 +400,249 @@
     });
   }
 
+  // --- تغيير تاريخ بدء الدورة (إعادة توليد الجدول) ---
+  // تصنيف جلسات الدورة: مقفلة أم حرة. المقفلة = لها سجل حضور واحد
+  // على الأقل، أو ملاحظة غير فارغة، أو mergedFrom غير فارغ، أو حالتها
+  // غير «مجدولة». الحرة = مجدولة بلا حضور وبلا ملاحظة وبلا دمج.
+  // الحضور يُقرأ جلسةً بعد جلسة (بالتسلسل، كما في buildCourseFileData)
+  // لتجنب إغراق الطلبات.
+  function classifyCourseSessions(courseId) {
+    return db().collection(COLLECTIONS.SESSIONS).where('courseId', '==', courseId).get()
+      .then(function (snap) {
+        var sessions = toList(snap);
+        var locked = [];
+        var free = [];
+        var chain = Promise.resolve();
+        sessions.forEach(function (s) {
+          chain = chain.then(function () {
+            return getSessionAttendance(s.id).then(function (att) {
+              var hasAttendance = Object.keys(att).length > 0;
+              var hasNote = !!(s.note && String(s.note).trim());
+              var hasMerged = Array.isArray(s.mergedFrom)
+                ? s.mergedFrom.length > 0
+                : !!s.mergedFrom;
+              if (hasAttendance || hasNote || hasMerged || s.state !== 'scheduled') {
+                locked.push(s);
+              } else {
+                free.push(s);
+              }
+            });
+          });
+        });
+        return chain.then(function () {
+          return { locked: locked, free: free };
+        });
+      });
+  }
+
+  function validateStartDate(newStartDate) {
+    if (!newStartDate || typeof newStartDate !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(newStartDate)) {
+      throw new Error('تاريخ البدء الجديد غير صالح — اختر تاريخاً صحيحاً');
+    }
+    var d = parseDate(newStartDate);
+    if (isNaN(d.getTime()) || dateStr(d) !== newStartDate) {
+      throw new Error('تاريخ البدء الجديد غير صالح — اختر تاريخاً صحيحاً');
+    }
+  }
+
+  // معاينة إعادة التوليد: أعداد فقط، بلا أي كتابة.
+  function rescheduleCoursePreview(courseId, newStartDate) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    try { validateStartDate(newStartDate); } catch (e) { return Promise.reject(e); }
+    return classifyCourseSessions(courseId).then(function (cls) {
+      var keptDates = cls.locked.map(function (s) { return s.date; }).sort();
+      return {
+        kept: cls.locked.length,
+        removed: cls.free.length,
+        keptDates: keptDates,
+        newStartDate: newStartDate
+      };
+    });
+  }
+
+  // إعادة توليد الجدول من تاريخ بدء جديد: تحذف الجلسات الحرة فقط،
+  // وتحتفظ بالمقفلة في مواعيدها، ثم تولّد من التاريخ الجديد على دفعات
+  // 4 أسابيع حتى بلوغ sessionCount (باحتساب المقفلة، لأن
+  // generateSchedule يحسب الجلسات الموجودة ويتخطى تواريخها).
+  function rescheduleCourse(courseId, newStartDate) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    try { validateStartDate(newStartDate); } catch (e) { return Promise.reject(e); }
+    var course, classification;
+    var totals = { created: 0, skippedHolidays: 0, unassignedHalls: [] };
+    return get(COLLECTIONS.COURSES, courseId).then(function (c) {
+      if (!c) throw new Error('الدورة غير موجودة');
+      course = c;
+      return classifyCourseSessions(courseId);
+    }).then(function (cls) {
+      classification = cls;
+      // الجلسات الحرة بلا حضور أصلاً — حذفها لا يترك حضوراً يتيماً.
+      var batch = db().batch();
+      cls.free.forEach(function (s) {
+        batch.delete(db().collection(COLLECTIONS.SESSIONS).doc(s.id));
+      });
+      batch.update(db().collection(COLLECTIONS.COURSES).doc(courseId), { startDate: newStartDate });
+      return batch.commit();
+    }).then(function () {
+      var chunkStart = parseDate(newStartDate);
+      var chunks = 0;
+      function runChunk() {
+        if (chunks >= 10) return Promise.resolve();
+        chunks++;
+        return generateSchedule(courseId, 4, dateStr(chunkStart)).then(function (res) {
+          totals.created += res.created;
+          totals.skippedHolidays += res.skippedHolidays;
+          totals.unassignedHalls = totals.unassignedHalls.concat(res.unassignedHalls || []);
+          if (res.created === 0) return;
+          chunkStart.setDate(chunkStart.getDate() + 28);
+          return db().collection(COLLECTIONS.SESSIONS).where('courseId', '==', courseId).get()
+            .then(function (snap) {
+              if (snap.size >= (Number(course.sessionCount) || 0)) return;
+              return runChunk();
+            });
+        });
+      }
+      return runChunk();
+    }).then(function () {
+      logAudit('course_reschedule', COLLECTIONS.COURSES, courseId,
+        'تغيير تاريخ بدء الدورة إلى ' + newStartDate + ': الاحتفاظ بـ ' +
+        classification.locked.length + ' جلسة، إعادة توليد ' + totals.created + ' جلسة');
+      return {
+        kept: classification.locked.length,
+        removed: classification.free.length,
+        created: totals.created,
+        skippedHolidays: totals.skippedHolidays,
+        unassignedHalls: totals.unassignedHalls
+      };
+    });
+  }
+
+  // --- معاينة حذف الدورة وحذفها (إدارة الدورات v1.1) ---
+  // قاعدة الحماية (نهائية): الحضور سجل رسمي لا يُحذف أبداً. إن كان
+  // لأي جلسة من جلسات الدورة سجل حضور واحد على الأقل، يُمنع حذف
+  // الدورة كلياً — في المعاينة وفي دالة الحذف نفسها (الواجهة ليست
+  // الحارس الوحيد). الدورة المحظور حذفها تُوقَف أو تُلغى بدلاً من ذلك.
+  // الحذف يشمل: الجلسات + حضورها (فارغ حتماً بعد فحص الحماية) +
+  // مصاريف الدورة + مستند الدورة نفسه. المتدربون سجلات دليل مستقلة
+  // (قد ينتمون لدورات أخرى) فلا تُحذف، والملاحظات تبقى بلا عرض.
+  function courseDeletePreview(courseId) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    return db().collection(COLLECTIONS.SESSIONS).where('courseId', '==', courseId).get()
+      .then(function (snap) {
+        var sessions = toList(snap);
+        var withAttendance = 0;
+        var chain = Promise.resolve();
+        sessions.forEach(function (s) {
+          chain = chain.then(function () {
+            return getSessionAttendance(s.id).then(function (att) {
+              if (Object.keys(att).length > 0) withAttendance++;
+            });
+          });
+        });
+        return chain.then(function () {
+          return db().collection(COLLECTIONS.EXPENSES).where('courseId', '==', courseId).get()
+            .then(function (expSnap) {
+              return { sessions: sessions.length, withAttendance: withAttendance, expenses: expSnap.size };
+            });
+        });
+      });
+  }
+
+  // حذف مراجع على دفعات متسلسلة: حد Firestore 500 عملية في الدفعة
+  // الواحدة — نلتزم بـ 400 كحد أقصى لكل التزام.
+  function commitDeleteRefsInChunks(refs) {
+    var chain = Promise.resolve();
+    for (var i = 0; i < refs.length; i += 400) {
+      (function (chunk) {
+        chain = chain.then(function () {
+          var batch = db().batch();
+          chunk.forEach(function (ref) { batch.delete(ref); });
+          return batch.commit();
+        });
+      })(refs.slice(i, i + 400));
+    }
+    return chain;
+  }
+
+  // حذف دورة كاملة: يعيد فحص الحماية أولاً (قبل أي كتابة) ويرفض
+  // برسالة عربية إن كان لأي جلسة حضور مسجل، ثم يحذف الجلسات
+  // وحضورها والمصاريف والدورة نفسها على دفعات.
+  function deleteCourse(courseId) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    var courseName = '';
+    var sessions = [];
+    var attendanceRefs = [];
+    var expenseRefs = [];
+    return get(COLLECTIONS.COURSES, courseId).then(function (c) {
+      if (!c) throw new Error('الدورة غير موجودة');
+      courseName = c.name || courseId;
+      return db().collection(COLLECTIONS.SESSIONS).where('courseId', '==', courseId).get();
+    }).then(function (snap) {
+      sessions = toList(snap);
+      // إعادة فحص الحماية أولاً — قبل أي كتابة.
+      var withAttendance = 0;
+      var chain = Promise.resolve();
+      sessions.forEach(function (s) {
+        chain = chain.then(function () {
+          return getSessionAttendance(s.id).then(function (att) {
+            var keys = Object.keys(att);
+            if (keys.length > 0) withAttendance++;
+            keys.forEach(function (tid) {
+              attendanceRefs.push(db().collection(COLLECTIONS.SESSIONS).doc(s.id)
+                .collection('attendance').doc(tid));
+            });
+          });
+        });
+      });
+      return chain.then(function () {
+        if (withAttendance > 0) {
+          throw new Error('لا يمكن حذف هذه الدورة — تحتوي ' + withAttendance +
+            ' جلسة على سجلات حضور. يمكنك إيقاف الدورة أو إلغاؤها بدلاً من ذلك.');
+        }
+        // الحماية مرّت: لا حضور مسجل أصلاً — قائمة مراجع الحضور فارغة حتماً.
+        return db().collection(COLLECTIONS.EXPENSES).where('courseId', '==', courseId).get();
+      });
+    }).then(function (expSnap) {
+      expSnap.forEach(function (doc) { expenseRefs.push(doc.ref); });
+      var refs = [];
+      sessions.forEach(function (s) {
+        refs.push(db().collection(COLLECTIONS.SESSIONS).doc(s.id));
+      });
+      refs = refs.concat(attendanceRefs, expenseRefs);
+      refs.push(db().collection(COLLECTIONS.COURSES).doc(courseId));
+      return commitDeleteRefsInChunks(refs);
+    }).then(function () {
+      logAudit('course_delete', COLLECTIONS.COURSES, courseId,
+        'حذف دورة: ' + courseName + ' — ' + sessions.length + ' جلسة، ' + expenseRefs.length + ' مصروف');
+      return { sessions: sessions.length, expenses: expenseRefs.length };
+    });
+  }
+
   // --- توفر القاعات ---
+  // القاعة مشغولة بجلسة مجدولة (غير ملغاة ولا عطلة) أو باجتماع عارض
+  // مجدول (غير ملغى). كل صف: {hallId, hallName, free, sessionCourse,
+  // meetingTitle, occupantKind}. حقل sessionCourse هو التسمية المعروضة
+  // في قوائم «مشغولة» عند كل المستدعين: اسم الدورة للجلسة، أو
+  // «اجتماع: <العنوان>» للاجتماع — فيبقى نص القوائم صحيحاً دون تغييرها.
   function checkHallAvailability(date, periodId) {
     var hallsP = list(COLLECTIONS.HALLS, 'name');
     var sessionsP = db().collection(COLLECTIONS.SESSIONS)
       .where('date', '==', date).where('periodId', '==', periodId).get();
-    return Promise.all([hallsP, sessionsP]).then(function (results) {
+    var meetingsP = db().collection(COLLECTIONS.MEETINGS)
+      .where('date', '==', date).where('periodId', '==', periodId).get();
+    return Promise.all([hallsP, sessionsP, meetingsP]).then(function (results) {
       var halls = results[0];
       var byHall = {}; // hallId -> courseId
       results[1].forEach(function (doc) {
         var s = doc.data();
-        if (s.hallId && s.state !== 'cancelled') byHall[s.hallId] = s.courseId;
+        // الملغاة والعطلة لا تشغلان القاعة.
+        if (s.hallId && s.state !== 'cancelled' && s.state !== 'holiday') byHall[s.hallId] = s.courseId;
+      });
+      var byMeeting = {}; // hallId -> meeting title
+      results[2].forEach(function (doc) {
+        var m = doc.data();
+        // الاجتماع الملغى لا يشغل القاعة.
+        if (m.hallId && m.status !== 'cancelled') byMeeting[m.hallId] = m.title;
       });
       var courseIds = Object.keys(byHall).map(function (k) { return byHall[k]; });
       var uniqueIds = courseIds.filter(function (v, i, a) { return a.indexOf(v) === i; });
@@ -382,11 +652,18 @@
           courses.forEach(function (c) { if (c) names[c.id] = c.name; });
           return halls.map(function (hall) {
             var courseId = byHall[hall.id] || null;
+            var meetingTitle = byMeeting[hall.id] || null;
+            // الجلسة والاجتماع لا يجتمعان في قاعة واحدة أصلاً (التحقق
+            // يمنعهما في الاتجاهين)؛ إن حدث ذلك تظهر الجلسة أولاً.
+            var kind = courseId ? 'session' : (meetingTitle ? 'meeting' : null);
             return {
               hallId: hall.id,
               hallName: hall.name,
-              free: !courseId,
-              sessionCourse: courseId ? (names[courseId] || courseId) : null
+              free: !kind,
+              sessionCourse: courseId ? (names[courseId] || courseId) :
+                (meetingTitle ? 'اجتماع: ' + meetingTitle : null),
+              meetingTitle: meetingTitle,
+              occupantKind: kind
             };
           });
         });
@@ -453,6 +730,116 @@
     });
   }
 
+  // --- تقسيم جلسة إلى جزأين ---
+  // الجزء الأول يبقى في موعده الأصلي؛ الجزء الثاني جلسة جديدة في فترة
+  // أخرى من اليوم نفسه (same-day) أو في يوم آخر (different-days).
+  // الجلسات تُعيَّن للفترات دائماً، لا لأوقات حرة: «التقسيم حسب الوقت
+  // في اليوم» يعني أن الجزأين يشغلان فترتين مختلفتين من اليوم نفسه.
+  // القاعة: المختارة إن أُعطيت وكانت حرة، وإلا أول قاعة حرة في الموعد
+  // الجديد (كما في generateSchedule)، وإلا بلا قاعة. الحضور يبقى على
+  // الأصل افتراضياً؛ مع moveAttendance يُنقل كاملاً إلى الجزء الجديد.
+  // التقسيم يضيف جلسة فعلية فوق sessionCount المخطط — وهذا صحيح،
+  // لأن الجلسات فعلية والتقدم يُحسب من الفعليات. حقول جديدة اختيارية
+  // فقط (splitFrom/splitInto) — لا ترحيل ولا تغيير على الجلسات القديمة.
+  function splitSession(sessionId, opts) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    opts = opts || {};
+    var mode = opts.mode === 'different-days' ? 'different-days' : 'same-day';
+    var newDate = mode === 'different-days' ? String(opts.date || '').trim() : null;
+    var newPeriodId = opts.periodId || null;
+    if (!newPeriodId) return Promise.reject(new Error('اختر الفترة للجزء الثاني'));
+    if (mode === 'different-days' && !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+      return Promise.reject(new Error('اختر تاريخاً صحيحاً للجزء الثاني'));
+    }
+
+    var original, newPeriod, origPeriod, newHallId;
+    return get(COLLECTIONS.SESSIONS, sessionId).then(function (s) {
+      if (!s) throw new Error('الجلسة غير موجودة');
+      if (s.state !== 'scheduled') throw new Error('لا يمكن تقسيم جلسة مكتملة أو ملغاة');
+      original = s;
+      if (mode === 'same-day') {
+        newDate = s.date;
+        if (newPeriodId === s.periodId) throw new Error('اختر فترة مختلفة عن فترة الجلسة الأصلية');
+      } else if (newDate === s.date && newPeriodId === s.periodId) {
+        throw new Error('اختر موعداً مختلفاً عن موعد الجلسة الأصلية');
+      }
+      return Promise.all([
+        get(COLLECTIONS.PERIODS, newPeriodId),
+        get(COLLECTIONS.PERIODS, s.periodId)
+      ]);
+    }).then(function (periods) {
+      newPeriod = periods[0];
+      origPeriod = periods[1];
+      if (!newPeriod) throw new Error('الفترة المختارة غير موجودة');
+      // القاعة: المختارة إن كانت حرة، وإلا أول قاعة حرة في الموعد الجديد.
+      return checkHallAvailability(newDate, newPeriodId);
+    }).then(function (rows) {
+      var wanted = opts.hallId || null;
+      var free = rows.filter(function (r) { return r.free; });
+      if (wanted) {
+        var wantedRow = null;
+        rows.forEach(function (r) { if (r.hallId === wanted) wantedRow = r; });
+        if (wantedRow && wantedRow.free) { newHallId = wanted; return null; }
+        // المختارة مشغولة أو غير موجودة: أول قاعة حرة بدلاً منها.
+      }
+      newHallId = free.length ? free[0].hallId : null;
+      return null;
+    }).then(function () {
+      // التحقق الكامل: ليس عطلة، والقاعة حرة (الجلسة الأصلية في موعد
+      // مختلف أصلاً فلا تعارض ذاتي هنا).
+      return validateSessionSlot(newDate, newPeriodId, newHallId, sessionId);
+    }).then(function () {
+      var actor = actorInfo();
+      var origLabel = origPeriod ? origPeriod.label : '';
+      var newNote = 'جزء مقسوم من جلسة ' + original.date + (origLabel ? ' ' + origLabel : '');
+      if (typeof opts.note === 'string' && opts.note.trim()) newNote += ' — ' + opts.note.trim();
+      var ref = db().collection(COLLECTIONS.SESSIONS).doc();
+      return ref.set({
+        courseId: original.courseId,
+        date: newDate,
+        periodId: newPeriodId,
+        hallId: newHallId,
+        state: 'scheduled',
+        note: newNote,
+        trainerPresent: null,
+        mergedFrom: null,
+        splitFrom: sessionId,
+        createdAt: serverTs(),
+        createdBy: actor.userId
+      }).then(function () { return ref.id; });
+    }).then(function (newId) {
+      var newLabel = newPeriod ? newPeriod.label : '';
+      var origNote = (original.note ? original.note + '\n' : '') +
+        'تم تقسيم هذه الجلسة — الجزء الثاني: ' + newDate + (newLabel ? ' ' + newLabel : '');
+      var updateP = db().collection(COLLECTIONS.SESSIONS).doc(sessionId).update({
+        splitInto: newId,
+        note: origNote
+      });
+      var moveP = Promise.resolve();
+      if (opts.moveAttendance) {
+        // نقل الحضور: نسخ كل سجل إلى حضور الجزء الجديد ثم حذفه من الأصل
+        // (بنفس نمط دفعة mergeSessions — الوجهة هنا مجموعة فرعية جديدة).
+        moveP = db().collection(COLLECTIONS.SESSIONS).doc(sessionId).collection('attendance').get()
+          .then(function (snap) {
+            if (snap.empty) return;
+            var batch = db().batch();
+            var newRef = db().collection(COLLECTIONS.SESSIONS).doc(newId);
+            snap.forEach(function (doc) {
+              batch.set(newRef.collection('attendance').doc(doc.id), doc.data());
+              batch.delete(doc.ref);
+            });
+            return batch.commit();
+          });
+      }
+      return Promise.all([updateP, moveP]).then(function () { return newId; });
+    }).then(function (newId) {
+      logAudit('session_split', COLLECTIONS.SESSIONS, sessionId,
+        'تقسيم الجلسة بتاريخ ' + original.date + ' — الجزء الثاني: ' + newDate +
+        (opts.moveAttendance ? ' (نُقل الحضور المسجل)' : ''));
+      return newId;
+    });
+  }
+
   // --- حالات الجلسات والحضور ---
   function setSessionState(sessionId, state, note) {
     try { requireWrite(); } catch (e) { return Promise.reject(e); }
@@ -463,6 +850,260 @@
     if (typeof note === 'string') data.note = note;
     return db().collection(COLLECTIONS.SESSIONS).doc(sessionId).update(data).then(function () {
       logAudit('session_state', COLLECTIONS.SESSIONS, sessionId, 'تغيير حالة الجلسة إلى: ' + (SESSION_STATE_LABELS[state] || state));
+    });
+  }
+
+  // --- التحقق المشترك من صلاحية موعد جلسة (للتأجيل والتعديل) ---
+  // التاريخ يجب ألا يكون عطلة، والقاعة (إن وُجدت) يجب أن تكون حرة
+  // في ذلك التاريخ والفترة. excludeSessionId تُستثنى من فحص القاعة
+  // (الجلسة نفسها عند تأجيلها أو تعديلها). الجلسات الملغاة أو بحالة
+  // عطلة لا تشغل القاعة، والاجتماعات الملغاة لا تشغلها أيضاً.
+  // تُرجع Promise تُرفض برسالة عربية عند التعارض.
+  // فحص الإشغال المشترك (جلسات + اجتماعات): تُرجع اسم الشاغل بالعربية
+  // («جلسة تدريبية» أو «اجتماع عارض») أو null إن كان الموعد حراً.
+  // excludeSessionId/excludeMeetingId يستثنيان المستند نفسه عند التعديل.
+  function slotOccupant(date, periodId, hallId, excludeSessionId, excludeMeetingId) {
+    var sessionsP = db().collection(COLLECTIONS.SESSIONS)
+      .where('date', '==', date).where('periodId', '==', periodId).get();
+    var meetingsP = db().collection(COLLECTIONS.MEETINGS)
+      .where('date', '==', date).where('periodId', '==', periodId).get();
+    return Promise.all([sessionsP, meetingsP]).then(function (results) {
+      var occupant = null;
+      results[0].forEach(function (doc) {
+        if (occupant) return;
+        if (doc.id === excludeSessionId) return;
+        var s = doc.data();
+        if (s.hallId === hallId && s.state !== 'cancelled' && s.state !== 'holiday') occupant = 'جلسة تدريبية';
+      });
+      if (occupant) return occupant;
+      results[1].forEach(function (doc) {
+        if (occupant) return;
+        if (doc.id === excludeMeetingId) return;
+        var m = doc.data();
+        if (m.hallId === hallId && m.status !== 'cancelled') occupant = 'اجتماع عارض';
+      });
+      return occupant;
+    });
+  }
+
+  function validateSessionSlot(date, periodId, hallId, excludeSessionId) {
+    return db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', date).limit(1).get()
+      .then(function (snap) {
+        if (!snap.empty) throw new Error('التاريخ المختار يوم عطلة — اختر تاريخاً آخر');
+        if (!hallId) return null;
+        return slotOccupant(date, periodId, hallId, excludeSessionId, null);
+      }).then(function (occupant) {
+        if (occupant) {
+          throw new Error('القاعة مشغولة في ذلك التاريخ والفترة (' + occupant + ') — اختر قاعة أخرى أو موعداً آخر');
+        }
+      });
+  }
+
+  // --- التحقق المشترك من صلاحية موعد اجتماع عارض (للإنشاء والتعديل) ---
+  // نفس قواعد الجلسة: ليس عطلة، والقاعة حرة من جلسة مجدولة ومن اجتماع
+  // عارض مجدول آخر. excludeMeetingId يستثني الاجتماع نفسه عند تعديله.
+  function validateMeetingSlot(date, periodId, hallId, excludeMeetingId) {
+    return db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', date).limit(1).get()
+      .then(function (snap) {
+        if (!snap.empty) throw new Error('التاريخ المختار يوم عطلة — اختر تاريخاً آخر');
+        if (!hallId) return null;
+        return slotOccupant(date, periodId, hallId, null, excludeMeetingId);
+      }).then(function (occupant) {
+        if (occupant) {
+          throw new Error('القاعة مشغولة في ذلك التاريخ والفترة (' + occupant + ') — اختر قاعة أخرى أو موعداً آخر');
+        }
+      });
+  }
+
+  // --- تأجيل جلسة إلى تاريخ وفترة جديدين ---
+  // hallId: إن لم يُمرَّر (undefined) تبقى قاعة الجلسة الحالية؛
+  // null تعني بلا قاعة. يُضاف سطر «تأجيل إلى …» إلى الملاحظة دائماً،
+  // ومعه نص الملاحظة الممرَّرة إن وُجدت. الحالة تعود إلى «مجدولة».
+  function postponeSession(sessionId, newDate, newPeriodId, hallId, note) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    if (!newDate || !newPeriodId) {
+      return Promise.reject(new Error('التاريخ والفترة مطلوبان لتأجيل الجلسة'));
+    }
+    var session, targetHall;
+    return get(COLLECTIONS.SESSIONS, sessionId).then(function (s) {
+      if (!s) throw new Error('الجلسة غير موجودة');
+      session = s;
+      targetHall = (hallId === undefined) ? (s.hallId || null) : hallId;
+      return validateSessionSlot(newDate, newPeriodId, targetHall, sessionId);
+    }).then(function () {
+      var line = 'تأجيل إلى ' + newDate;
+      if (typeof note === 'string' && note.trim()) line += ' — ' + note.trim();
+      var newNote = (session.note ? session.note + '\n' : '') + line;
+      return db().collection(COLLECTIONS.SESSIONS).doc(sessionId).update({
+        date: newDate,
+        periodId: newPeriodId,
+        hallId: targetHall,
+        state: 'scheduled',
+        note: newNote
+      }).then(function () {
+        logAudit('session_postpone', COLLECTIONS.SESSIONS, sessionId,
+          'تأجيل الجلسة من ' + session.date + ' إلى ' + newDate);
+      });
+    });
+  }
+
+  // --- تحويل جلسة إلى عطلة ---
+  // الحالة تصبح «عطلة» (لا تشغل القاعة بعدها). إن كان addToHolidays
+  // صحيحاً ولم يكن التاريخ عطلة مسجلة أصلاً، تُضاف عطلة بذلك التاريخ
+  // باسم الدورة.
+  function markSessionHoliday(sessionId, note, addToHolidays) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    var session;
+    return get(COLLECTIONS.SESSIONS, sessionId).then(function (s) {
+      if (!s) throw new Error('الجلسة غير موجودة');
+      session = s;
+      var newNote = s.note || '';
+      if (typeof note === 'string' && note.trim()) {
+        newNote = (newNote ? newNote + '\n' : '') + 'عطلة: ' + note.trim();
+      }
+      return db().collection(COLLECTIONS.SESSIONS).doc(sessionId).update({
+        state: 'holiday',
+        note: newNote
+      });
+    }).then(function () {
+      if (!addToHolidays) return;
+      return db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', session.date).limit(1).get()
+        .then(function (snap) {
+          if (!snap.empty) return;
+          return get(COLLECTIONS.COURSES, session.courseId).then(function (course) {
+            var name = 'عطلة — ' + (course ? course.name : 'عطلة');
+            return db().collection(COLLECTIONS.HOLIDAYS).add({ date: session.date, name: name });
+          });
+        });
+    }).then(function () {
+      logAudit('session_holiday', COLLECTIONS.SESSIONS, sessionId,
+        'تحويل الجلسة بتاريخ ' + session.date + ' إلى عطلة');
+    });
+  }
+
+  // --- تعديل عام للجلسة (يستخدمه نموذج «تعديل الجلسة») ---
+  // data قد تحتوي {date, periodId, hallId, note}. عند تغيير التاريخ
+  // أو الفترة تُطبَّق نفس تحققات التأجيل (ليس عطلة، القاعة حرة مع
+  // استثناء الجلسة نفسها). لا يغيّر الحالة أبداً.
+  function updateSession(sessionId, data) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    data = data || {};
+    var session;
+    return get(COLLECTIONS.SESSIONS, sessionId).then(function (s) {
+      if (!s) throw new Error('الجلسة غير موجودة');
+      session = s;
+      var newDate = data.date || s.date;
+      var newPeriodId = data.periodId || s.periodId;
+      var newHallId = (data.hallId === undefined) ? (s.hallId || null) : data.hallId;
+      var slotChanged = (newDate !== s.date) || (newPeriodId !== s.periodId);
+      var hallChanged = newHallId !== (s.hallId || null);
+      if (!slotChanged && !hallChanged) return null;
+      return validateSessionSlot(newDate, newPeriodId, newHallId, sessionId);
+    }).then(function () {
+      var updateData = {};
+      if (data.date) updateData.date = data.date;
+      if (data.periodId) updateData.periodId = data.periodId;
+      if (data.hallId !== undefined) updateData.hallId = data.hallId;
+      if (typeof data.note === 'string') updateData.note = data.note;
+      if (Object.keys(updateData).length === 0) return;
+      return db().collection(COLLECTIONS.SESSIONS).doc(sessionId).update(updateData).then(function () {
+        logAudit('session_update', COLLECTIONS.SESSIONS, sessionId,
+          'تعديل الجلسة بتاريخ ' + (updateData.date || session.date));
+      });
+    });
+  }
+
+  // --- الاجتماعات العارضة (حجز قاعة لمرة واحدة) ---
+  // مستند الاجتماع: {title, hallId, date, periodId, organizer?, notes?,
+  // status: 'scheduled'|'cancelled', createdAt, createdBy}.
+  // الاجتماع المجدول يشغل قاعته كالجلسة تماماً (الرزنامة، توفر القاعات،
+  // توليد الجدول، التحقق)؛ الملغى يحرّرها. لا تصدير للاجتماعات.
+  function createMeeting(data) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    data = data || {};
+    var title = String(data.title || '').trim();
+    if (!title) return Promise.reject(new Error('عنوان الاجتماع مطلوب'));
+    if (!data.hallId) return Promise.reject(new Error('اختر قاعة الاجتماع'));
+    if (!data.date) return Promise.reject(new Error('اختر تاريخ الاجتماع'));
+    if (!data.periodId) return Promise.reject(new Error('اختر فترة الاجتماع'));
+    return validateMeetingSlot(data.date, data.periodId, data.hallId, null).then(function () {
+      var actor = actorInfo();
+      return db().collection(COLLECTIONS.MEETINGS).add({
+        title: title,
+        hallId: data.hallId,
+        date: data.date,
+        periodId: data.periodId,
+        organizer: String(data.organizer || '').trim(),
+        notes: String(data.notes || '').trim(),
+        status: 'scheduled',
+        createdAt: serverTs(),
+        createdBy: actor.userId
+      }).then(function (ref) {
+        logAudit('meeting_create', COLLECTIONS.MEETINGS, ref.id,
+          'إنشاء اجتماع عارض: ' + title + ' — ' + data.date);
+        return ref.id;
+      });
+    });
+  }
+
+  // تعديل اجتماع عارض. عند تغيير التاريخ أو الفترة أو القاعة تُطبَّق
+  // نفس تحققات الإنشاء (ليس عطلة، القاعة حرة مع استثناء الاجتماع نفسه).
+  // لا يغيّر الحالة أبداً.
+  function updateMeeting(id, data) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    data = data || {};
+    var meeting;
+    return get(COLLECTIONS.MEETINGS, id).then(function (m) {
+      if (!m) throw new Error('الاجتماع غير موجود');
+      meeting = m;
+      var newTitle = (data.title !== undefined) ? String(data.title).trim() : m.title;
+      if (!newTitle) throw new Error('عنوان الاجتماع مطلوب');
+      var newDate = data.date || m.date;
+      var newPeriodId = data.periodId || m.periodId;
+      var newHallId = (data.hallId === undefined) ? m.hallId : data.hallId;
+      if (!newHallId) throw new Error('اختر قاعة الاجتماع');
+      var slotChanged = (newDate !== m.date) || (newPeriodId !== m.periodId) || (newHallId !== m.hallId);
+      if (!slotChanged) return null;
+      return validateMeetingSlot(newDate, newPeriodId, newHallId, id);
+    }).then(function () {
+      var updateData = {};
+      if (data.title !== undefined) updateData.title = String(data.title).trim();
+      if (data.date) updateData.date = data.date;
+      if (data.periodId) updateData.periodId = data.periodId;
+      if (data.hallId !== undefined) updateData.hallId = data.hallId;
+      if (data.organizer !== undefined) updateData.organizer = String(data.organizer).trim();
+      if (data.notes !== undefined) updateData.notes = String(data.notes).trim();
+      if (Object.keys(updateData).length === 0) return;
+      return db().collection(COLLECTIONS.MEETINGS).doc(id).update(updateData).then(function () {
+        logAudit('meeting_update', COLLECTIONS.MEETINGS, id,
+          'تعديل اجتماع عارض: ' + (updateData.title || meeting.title));
+      });
+    });
+  }
+
+  // إلغاء اجتماع عارض: الحالة تصبح «ملغى» (تحرّر القاعة). الملاحظة
+  // الممرَّرة تُلحق بملاحظات الاجتماع إن وُجدت.
+  function cancelMeeting(id, note) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    var meeting;
+    return get(COLLECTIONS.MEETINGS, id).then(function (m) {
+      if (!m) throw new Error('الاجتماع غير موجود');
+      meeting = m;
+      var data = { status: 'cancelled' };
+      if (typeof note === 'string' && note.trim()) {
+        data.notes = (m.notes ? m.notes + '\n' : '') + 'إلغاء: ' + note.trim();
+      }
+      return db().collection(COLLECTIONS.MEETINGS).doc(id).update(data).then(function () {
+        logAudit('meeting_cancel', COLLECTIONS.MEETINGS, id,
+          'إلغاء اجتماع عارض: ' + m.title + ' — ' + m.date);
+      });
+    });
+  }
+
+  // حذف اجتماع عارض نهائياً.
+  function deleteMeeting(id) {
+    return remove(COLLECTIONS.MEETINGS, id).then(function () {
+      logAudit('meeting_delete', COLLECTIONS.MEETINGS, id, 'حذف اجتماع عارض');
     });
   }
 
@@ -601,6 +1242,7 @@
     TRAINEE_STATUSES: TRAINEE_STATUSES,
     ATTENDANCE_STATUSES: ATTENDANCE_STATUSES,
     SESSION_STATES: SESSION_STATES,
+    MEETING_STATUSES: MEETING_STATUSES,
     COURSE_STATUSES: COURSE_STATUSES,
     list: list,
     get: get,
@@ -609,9 +1251,21 @@
     remove: remove,
     seedDefaults: seedDefaults,
     generateSchedule: generateSchedule,
+    rescheduleCoursePreview: rescheduleCoursePreview,
+    rescheduleCourse: rescheduleCourse,
+    courseDeletePreview: courseDeletePreview,
+    deleteCourse: deleteCourse,
     checkHallAvailability: checkHallAvailability,
     mergeSessions: mergeSessions,
+    splitSession: splitSession,
     setSessionState: setSessionState,
+    postponeSession: postponeSession,
+    markSessionHoliday: markSessionHoliday,
+    updateSession: updateSession,
+    createMeeting: createMeeting,
+    updateMeeting: updateMeeting,
+    cancelMeeting: cancelMeeting,
+    deleteMeeting: deleteMeeting,
     recordTrainerAttendance: recordTrainerAttendance,
     setAttendance: setAttendance,
     getSessionAttendance: getSessionAttendance,
