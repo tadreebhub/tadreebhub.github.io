@@ -45,6 +45,22 @@
     return p.label + ' (' + '\u202A' + fmtTime12(p.start) + ' - ' + fmtTime12(p.end) + '\u202C)';
   }
 
+  // عرض توفر القاعات لكل قاعة على حدة (v2.2): اسم القاعة + حالة
+  // (متاحة / مشغولة — باسم الدورة أو الاجتماع). صفوف
+  // checkHallAvailability. isSelfHall اختياري (قاعة الاجتماع نفسه
+  // عند التعديل تُعامل كمتاحة).
+  function hallAvailabilityListHtml(rows, isSelfHall) {
+    if (!rows.length) return 'لا قاعات مسجلة.';
+    return rows.map(function (r) {
+      var self = isSelfHall ? isSelfHall(r) : false;
+      if (r.free || self) {
+        return '<div>' + UI.escapeHtml(r.hallName) + ' <span class="pill pill-green">متاحة</span></div>';
+      }
+      return '<div>' + UI.escapeHtml(r.hallName) + ' <span class="pill pill-red">مشغولة' +
+        (r.sessionCourse ? ' — ' + UI.escapeHtml(r.sessionCourse) : '') + '</span></div>';
+    }).join('');
+  }
+
   // اختار المستخدم عرضاً يدوياً في هذه الزيارة؟ عندها يتوقف تطبيق
   // العرض الافتراضي من الإعدادات حتى زيارة جديدة (إعادة تحميل الصفحة).
   var userPickedView = false;
@@ -845,10 +861,7 @@
       window.TadreebDB.checkHallAvailability(date, periodId).then(function (rows) {
         var isSelfSlot = !!(meeting && date === meeting.date && periodId === meeting.periodId);
         var isSelfHall = function (r) { return isSelfSlot && r.hallId === meeting.hallId; };
-        var free = rows.filter(function (r) { return r.free || isSelfHall(r); }).map(function (r) { return r.hallName; });
-        var busy = rows.filter(function (r) { return !r.free && !isSelfHall(r); }).map(function (r) { return r.hallName + ' (' + r.sessionCourse + ')'; });
-        availEl.textContent = 'متاحة: ' + (free.length ? free.join('، ') : 'لا قاعة حرة') +
-          (busy.length ? ' — مشغولة: ' + busy.join('، ') : '');
+        availEl.innerHTML = hallAvailabilityListHtml(rows, isSelfHall);
         hallSel.querySelectorAll('option[value]').forEach(function (opt) {
           if (!opt.value) return;
           var row = rows.find(function (r) { return r.hallId === opt.value; });

@@ -724,6 +724,50 @@
     });
   }
 
+  // خريطة إشغال مفصّلة (v2.2): «date|periodId» ← {hallId: {kind, label}}.
+  // القواعد نفسها التي يستخدمها buildHallOccupancy؛ الفرق أن كل قاعة
+  // مشغولة تحمل اسم شاغلها: اسم الدورة للجلسة، أو «اجتماع: <العنوان>»
+  // للاجتماع العارض — لتُعرض في تفاصيل الشريحة المحجوزة.
+  function buildHallOccupancyDetail(excludeCourseId) {
+    var detail = {};
+    function mark(date, periodId, hallId, kind, label) {
+      if (!date || !periodId || !hallId) return;
+      var key = date + '|' + periodId;
+      if (!detail[key]) detail[key] = {};
+      // الجلسة والاجتماع لا يجتمعان في قاعة واحدة أصلاً؛ إن حدث
+      // ذلك تظهر الجلسة أولاً (كما في checkHallAvailability).
+      if (detail[key][hallId] && detail[key][hallId].kind === 'session') return;
+      detail[key][hallId] = { kind: kind, label: label };
+    }
+    App.Store.getAll('sessions').forEach(function (s) {
+      if (excludeCourseId && s.courseId === excludeCourseId) return;
+      if (s.state === 'cancelled' || s.state === 'holiday') return;
+      var c = s.courseId ? App.Store.get('courses', s.courseId) : null;
+      mark(s.date, s.periodId, s.hallId, 'session', c ? c.name : 'جلسة تدريبية');
+    });
+    App.Store.getAll('meetings').forEach(function (m) {
+      if (m.status === 'cancelled') return;
+      mark(m.date, m.periodId, m.hallId, 'meeting', 'اجتماع: ' + (m.title || ''));
+    });
+    return detail;
+  }
+
+  // عرض توفر القاعات لكل قاعة على حدة (v2.2): اسم القاعة + حالة
+  // (متاحة / مشغولة — باسم الدورة أو الاجتماع). صفوف
+  // checkHallAvailability. isSelfHall اختياري (قاعة الاجتماع/الجلسة
+  // نفسها عند التعديل تُعامل كمتاحة).
+  function hallAvailabilityListHtml(rows, isSelfHall) {
+    if (!rows.length) return 'لا قاعات مسجلة.';
+    return rows.map(function (r) {
+      var self = isSelfHall ? isSelfHall(r) : false;
+      if (r.free || self) {
+        return '<div>' + UI.escapeHtml(r.hallName) + ' <span class="pill pill-green">متاحة</span></div>';
+      }
+      return '<div>' + UI.escapeHtml(r.hallName) + ' <span class="pill pill-red">مشغولة' +
+        (r.sessionCourse ? ' — ' + UI.escapeHtml(r.sessionCourse) : '') + '</span></div>';
+    }).join('');
+  }
+
   function calAddDays(dateStr, n) {
     var d = UI.parseDateStr(dateStr);
     if (!d) return null;
@@ -915,6 +959,20 @@
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
       '<label for="cf-cal-defaulthall" style="font-weight:600">القاعة الافتراضية للجلسات:</label>' +
       '<select id="cf-cal-defaulthall" class="input" style="flex:1;min-width:160px">' + hallOptionsHtml(null) + '</select></div>' +
+      '<div class="cf-cal-tools">' +
+      '<div class="legend" style="margin-bottom:8px">' +
+      '<span><span class="dot" style="background:#2E7D32"></span>متاح</span>' +
+      '<span><span class="dot" style="background:#B45309"></span>متاح جزئياً</span>' +
+      '<span><span class="dot" style="background:#C62828"></span>محجوز</span>' +
+      '<span><span class="dot" style="background:#081F31"></span>مختار</span>' +
+      '</div>' +
+      '<div class="cf-cal-actions">' +
+      '<button type="button" class="btn btn-outline btn-sm" id="cf-cal-freeonly" aria-pressed="false">المتاحة فقط</button>' +
+      '<button type="button" class="btn btn-outline btn-sm" id="cf-cal-smartfill">تعبئة ذكية</button>' +
+      '<button type="button" class="btn btn-outline btn-sm" id="cf-cal-pattern" hidden>إكمال النمط</button>' +
+      '</div>' +
+      '<div id="cf-cal-smart-note" class="muted" hidden style="margin-bottom:8px"></div>' +
+      '</div>' +
       '<div id="cf-calendar" style="max-height:50vh;overflow-y:auto"></div>' +
       '<div style="margin-top:10px"><button type="button" class="btn btn-outline btn-sm" id="cf-cal-more">إظهار أسابيع إضافية</button></div>' +
       '<div class="field-hint">' + (isEdit ?
@@ -1104,6 +1162,9 @@
     var calPicks = {};
     var calWeeksShown = 4;
     var calOccupied = {};
+    var calOccupiedDetail = {};
+    var calFreeOnly = false;
+    var calDetailKey = null;
     if (isEdit) {
       App.sessionsForCourse(course.id).forEach(function (s) {
         if (s.state === 'cancelled' || s.state === 'holiday') return;
@@ -1131,6 +1192,258 @@
     function calStartDateVal() {
       var el = card.querySelector('[name="startDate"]');
       return (el && el.value) || UI.todayStr();
+    }
+
+    // ---------- الرزنامة الذكية (v2.2) ----------
+    // القاعة الافتراضية المختارة حالياً (null = تلقائي). '__new__'
+    // تُعامل كتلقائي (الإضافة السريعة تعيدها إلى '' بعد الإنشاء).
+    function calDefaultHallVal() {
+      var sel = card.querySelector('#cf-cal-defaulthall');
+      var v = sel ? sel.value : '';
+      return (v && v !== '__new__') ? v : null;
+    }
+
+    // حالة توفر موعد (يوم + فترة) — تحترم القاعة الافتراضية:
+    // تلقائي: متاح إن كانت كل القاعات حرة، محجوز إن لم توجد حرة،
+    // جزئي بينهما. قاعة محددة: متاح/محجوز حسب تلك القاعة وحدها.
+    // بلا قاعات مسجلة أصلاً: كل موعد متاح (الجلسات تُنشأ بلا قاعة).
+    function calSlotState(date, periodId) {
+      var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
+      if (!halls.length) return { state: 'free', freeCount: 0, total: 0, freeHalls: [], busyHalls: [] };
+      var defHall = calDefaultHallVal();
+      if (defHall) {
+        var busy = isHallOccupied(calOccupied, date, periodId, defHall);
+        return {
+          state: busy ? 'busy' : 'free', freeCount: busy ? 0 : 1, total: 1,
+          freeHalls: busy ? [] : [defHall], busyHalls: busy ? [defHall] : []
+        };
+      }
+      var freeHalls = freeHallsFor(calOccupied, date, periodId);
+      var freeIds = freeHalls.map(function (h) { return h.id; });
+      var busyHalls = halls.filter(function (h) { return freeIds.indexOf(h.id) === -1; }).map(function (h) { return h.id; });
+      var state = freeIds.length === halls.length ? 'free' : (freeIds.length === 0 ? 'busy' : 'partial');
+      return { state: state, freeCount: freeIds.length, total: halls.length, freeHalls: freeIds, busyHalls: busyHalls };
+    }
+
+    // نص حالة الشريحة: «✓ متاح» / «✕ محجوز» / «2 من 3 حرة».
+    function calSlotStatusText(st) {
+      if (st.state === 'free') return '✓ متاح';
+      if (st.state === 'busy') return '✕ محجوز';
+      return st.freeCount + ' من ' + st.total + ' حرة';
+    }
+
+    // تسمية عدد الفترات الحرة في اليوم: «اليوم مكتمل» / «فترة واحدة
+    // حرة» / «فترتان حرتان» / «N فترات حرة».
+    function calFreePeriodsLabel(n) {
+      if (n === 0) return 'اليوم مكتمل';
+      if (n === 1) return 'فترة واحدة حرة';
+      if (n === 2) return 'فترتان حرتان';
+      return n + ' فترات حرة';
+    }
+
+    // تفاصيل إشغال موعد: حالة كل قاعة (حرة/مشغولة وبمن) + زر اختيار
+    // صريح للموعد المحجوز (يُنشئ الجلسة بلا قاعة إن لم توجد حرة —
+    // السلوك اليدوي السابق نفسه، لكن بقرار صريح بعد رؤية السبب).
+    function calSlotDetailHtml(date, periodId) {
+      var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
+      var det = calOccupiedDetail[date + '|' + periodId] || {};
+      var rows = halls.map(function (h) {
+        var occ = det[h.id];
+        return '<div class="cf-detail-row"><span>' + UI.escapeHtml(h.name) + '</span><span>' +
+          (occ ? '✕ ' + UI.escapeHtml(occ.label) : '✓ متاحة') + '</span></div>';
+      }).join('');
+      if (!halls.length) rows = '<div class="muted">لا قاعات مسجلة — تُنشأ الجلسة بلا قاعة.</div>';
+      return '<div class="cf-chip-detail" data-cf-detail="' + date + '|' + UI.escapeHtml(periodId) + '">' +
+        '<div style="font-weight:600;margin-bottom:4px">توفر القاعات في هذا الموعد:</div>' + rows +
+        '<div style="margin-top:8px"><button type="button" class="btn btn-outline btn-sm" data-cf-detail-pick="' + date + '|' + UI.escapeHtml(periodId) + '">اختيار هذه الفترة</button></div>' +
+        '</div>';
+    }
+
+    function calCloseDetail() {
+      calDetailKey = null;
+      var d = card.querySelector('.cf-chip-detail');
+      if (d && d.parentNode) d.parentNode.removeChild(d);
+    }
+
+    // كشف نمط الاختيارات: زوج (يوم أسبوع + فترة) يتكرر في أسبوعين
+    // مختلفين على الأقل = نمط أسبوعي واضح. تُقبل أزواج متعددة إن
+    // اتفقت على فترة واحدة (الأحد والثلاثاء — الفترة الأولى)؛ إن
+    // اختلفت الفترات فلا نمط واضح (لا يُعرض الزر).
+    function calDetectPattern() {
+      var picks = calPicksList();
+      if (picks.length < 2) return null;
+      var groups = {};
+      picks.forEach(function (p) {
+        var wd = calWeekday(p.date);
+        if (wd < 0) return;
+        var weekStart = calAddDays(p.date, -wd);
+        var key = wd + '|' + p.periodId;
+        if (!groups[key]) groups[key] = { weekday: wd, periodId: p.periodId, weeks: {} };
+        groups[key].weeks[weekStart] = true;
+      });
+      var pairs = Object.keys(groups).map(function (k) { return groups[k]; })
+        .filter(function (g) { return Object.keys(g.weeks).length >= 2; });
+      if (!pairs.length) return null;
+      var periodId = pairs[0].periodId;
+      for (var i = 1; i < pairs.length; i++) {
+        if (pairs[i].periodId !== periodId) return null;
+      }
+      var weekdays = pairs.map(function (g) { return g.weekday; }).sort(function (a, b) { return a - b; });
+      var period = App.Store.get('periods', periodId);
+      return {
+        weekdays: weekdays,
+        periodId: periodId,
+        label: weekdays.map(function (d) { return UI.WEEKDAYS[d]; }).join(' و') + ' — ' + (period ? period.label : '')
+      };
+    }
+
+    // عدد الأسابيع من تاريخ البدء حتى تاريخ معين (لتمديد الرزنامة).
+    function calWeeksForDate(date) {
+      var start = UI.parseDateStr(calStartDateVal());
+      var d = UI.parseDateStr(date);
+      if (!start || !d) return calWeeksShown;
+      var diff = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (diff < 0) return calWeeksShown;
+      return Math.min(52, Math.floor(diff / 7) + 1);
+    }
+
+    // مواعيد مرشحة للتعبئة: من تاريخ البدء، أسبوعاً أسبوعاً حتى
+    // capWeeks. daysFilter اختياري (أيام أسبوع مسموحة). تُستثنى
+    // العطل والاختيارات الحالية والمواعيد المحجوزة كلياً (حسب
+    // القاعة الافتراضية). داخل اليوم تُفضَّل فترة النمط (أكثر فترة
+    // مختارة) ثم ترتيب الفترات. onePerDay: موعد واحد في اليوم فقط
+    // (ويتخطى اليوم الذي فيه اختيار حالي). تُرجع قائمة مرتبة زمنياً.
+    function calFillCandidates(daysFilter, capWeeks, patternPeriodId, onePerDay) {
+      var holidays = {};
+      App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
+      var periods = sortedPeriods();
+      var startDate = calStartDateVal();
+      var out = [];
+      for (var w = 0; w < capWeeks; w++) {
+        for (var i = 0; i < 7; i++) {
+          var date = calAddDays(startDate, w * 7 + i);
+          if (!date || holidays[date]) continue;
+          if (daysFilter && daysFilter.indexOf(calWeekday(date)) === -1) continue;
+          if (onePerDay && periods.some(function (p) { return !!calPicks[date + '|' + p.id]; })) continue;
+          var dayPeriods = periods.slice().sort(function (a, b) {
+            var ap = patternPeriodId && a.id === patternPeriodId ? 0 : 1;
+            var bp = patternPeriodId && b.id === patternPeriodId ? 0 : 1;
+            if (ap !== bp) return ap - bp;
+            return (a.order || 0) - (b.order || 0);
+          });
+          var taken = false;
+          dayPeriods.forEach(function (p) {
+            if (onePerDay && taken) return;
+            if (calPicks[date + '|' + p.id]) return;
+            if (calSlotState(date, p.id).state === 'busy') return;
+            out.push({ date: date, periodId: p.id });
+            taken = true;
+          });
+        }
+      }
+      return out;
+    }
+
+    // رسالة تأكيد قصيرة أسفل أزرار الرزنامة (تُمسح عند إعادة الرسم).
+    function calShowSmartNote(text) {
+      var noteEl = card.querySelector('#cf-cal-smart-note');
+      if (noteEl) { noteEl.textContent = text; noteEl.hidden = false; }
+    }
+
+    // التعبئة الذكية: تملأ الجلسات المتبقية بأقرب المواعيد المتاحة،
+    // بالترتيب: (أ) الأيام المفضلة المحددة في النموذج (أو أيام
+    // الاختيارات الحالية إن لم تُحدد) — موعد واحد في اليوم؛ (ب) ثم
+    // فترات إضافية في الأيام نفسها؛ (ج) ثم أي يوم متاح. تُمدَّد
+    // الرزنامة تلقائياً حتى 52 أسبوعاً. لا تختار موعداً محجوزاً أبداً.
+    function calSmartFill() {
+      var sc = calSessionCountVal();
+      if (sc <= 0) { calShowSmartNote('حدّد عدد الجلسات المطلوب أولاً.'); return; }
+      var remaining = sc - calPicksList().length;
+      if (remaining <= 0) { calShowSmartNote('اكتمل العدد المطلوب — لا جلسات متبقية.'); return; }
+      if (!sortedPeriods().length) { calShowSmartNote('لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة أولاً.'); return; }
+      var picks = calPicksList();
+      var patternPeriodId = null;
+      if (picks.length) {
+        var counts = {};
+        picks.forEach(function (p) { counts[p.periodId] = (counts[p.periodId] || 0) + 1; });
+        var best = 0;
+        Object.keys(counts).forEach(function (k) { if (counts[k] > best) { best = counts[k]; patternPeriodId = k; } });
+      }
+      var dayFilter = calCheckedDays();
+      if (!dayFilter.length && picks.length) {
+        var wdSet = {};
+        picks.forEach(function (p) { var wd = calWeekday(p.date); if (wd >= 0) wdSet[wd] = true; });
+        dayFilter = Object.keys(wdSet).map(function (k) { return parseInt(k, 10); });
+      }
+      if (!dayFilter.length) dayFilter = null;
+      var chosen = [];
+      var seen = {};
+      function take(cands) {
+        for (var i = 0; i < cands.length && chosen.length < remaining; i++) {
+          var k = cands[i].date + '|' + cands[i].periodId;
+          if (!seen[k]) { seen[k] = true; chosen.push(cands[i]); }
+        }
+      }
+      if (dayFilter) take(calFillCandidates(dayFilter, 52, patternPeriodId, true));
+      if (chosen.length < remaining && dayFilter) take(calFillCandidates(dayFilter, 52, patternPeriodId, false));
+      if (chosen.length < remaining) take(calFillCandidates(null, 52, patternPeriodId, false));
+      var defHall = calDefaultHallVal();
+      chosen.forEach(function (c) {
+        calPicks[c.date + '|' + c.periodId] = { date: c.date, periodId: c.periodId, hallId: defHall };
+      });
+      var weeksNeeded = 0;
+      if (chosen.length) weeksNeeded = calWeeksForDate(chosen[chosen.length - 1].date);
+      var extended = false;
+      if (weeksNeeded > calWeeksShown) { calWeeksShown = Math.min(52, weeksNeeded); extended = true; }
+      renderCalendar(false);
+      var left = sc - calPicksList().length;
+      var msg = 'تم اختيار ' + chosen.length + ' جلسة' + (left > 0 ? ' — متبقّي ' + left : ' — اكتمل العدد');
+      if (extended) msg += ' (تم تمديد الرزنامة إلى ' + calWeeksShown + ' أسبوعاً)';
+      if (left > 0) msg += ' — لا توجد فترات حرة كافية ضمن 52 أسبوعاً.';
+      calShowSmartNote(msg);
+    }
+
+    // إكمال النمط: يملأ الجلسات المتبقية بمواعيد النمط المكتشف فقط
+    // (أيام + فترة النمط)، المتاحة منها فقط، بدءاً من أسبوع أول
+    // اختيار (لا يعود إلى أسابيع قبل ما اختاره المستخدم).
+    function calCompletePattern() {
+      var pattern = calDetectPattern();
+      if (!pattern) return;
+      var sc = calSessionCountVal();
+      var remaining = sc - calPicksList().length;
+      if (remaining <= 0) { calShowSmartNote('اكتمل العدد المطلوب — لا جلسات متبقية.'); return; }
+      var holidays = {};
+      App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
+      var picks = calPicksList();
+      var firstPick = picks.length ? sortPicks(picks)[0] : null;
+      var baseDate = firstPick ? firstPick.date : calStartDateVal();
+      var baseWeekStart = calAddDays(baseDate, -calWeekday(baseDate)) || baseDate;
+      var chosen = [];
+      for (var w = 0; w < 52 && chosen.length < remaining; w++) {
+        for (var i = 0; i < 7 && chosen.length < remaining; i++) {
+          var date = calAddDays(baseWeekStart, w * 7 + i);
+          if (!date || holidays[date]) continue;
+          if (pattern.weekdays.indexOf(calWeekday(date)) === -1) continue;
+          var key = date + '|' + pattern.periodId;
+          if (calPicks[key]) continue;
+          if (calSlotState(date, pattern.periodId).state === 'busy') continue;
+          chosen.push({ date: date, periodId: pattern.periodId });
+        }
+      }
+      var defHall = calDefaultHallVal();
+      chosen.forEach(function (c) {
+        calPicks[c.date + '|' + c.periodId] = { date: c.date, periodId: c.periodId, hallId: defHall };
+      });
+      var weeksNeeded = 0;
+      if (chosen.length) weeksNeeded = calWeeksForDate(chosen[chosen.length - 1].date);
+      var extended = false;
+      if (weeksNeeded > calWeeksShown) { calWeeksShown = Math.min(52, weeksNeeded); extended = true; }
+      renderCalendar(false);
+      var left = sc - calPicksList().length;
+      var msg = 'تم إكمال النمط: أُضيفت ' + chosen.length + ' جلسة' + (left > 0 ? ' — متبقّي ' + left : ' — اكتمل العدد');
+      if (extended) msg += ' (تم تمديد الرزنامة إلى ' + calWeeksShown + ' أسبوعاً)';
+      if (left > 0) msg += ' — لا توجد مواعيد حرة كافية ضمن النمط.';
+      calShowSmartNote(msg);
     }
 
     // مدة الرزنامة الأولية: عند اختيار أيام مفضلة تُحسب من عدد
@@ -1197,6 +1510,14 @@
         '<strong>' + UI.escapeHtml(label) + '</strong>';
       if (date === today) html += '<span class="pill pill-navy">اليوم</span>';
       if (isHoliday) html += '<span class="pill pill-amber">عطلة: ' + UI.escapeHtml(holidays[date]) + '</span>';
+      // ملخص توفر اليوم (v2.2) — يُحسب من بيانات الإشغال نفسها.
+      if (!isHoliday && periods.length) {
+        var freeCount = 0;
+        periods.forEach(function (p) {
+          if (calSlotState(date, p.id).state !== 'busy') freeCount++;
+        });
+        html += '<span class="cf-day-summary muted">' + UI.escapeHtml(calFreePeriodsLabel(freeCount)) + '</span>';
+      }
       html += '</div>';
       if (isHoliday) {
         // جلسات حالية في يوم عطلة (وُجدت قبل تسجيل العطلة): تُعرض
@@ -1213,19 +1534,35 @@
       } else if (!periods.length) {
         html += '<div class="muted">لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة أولاً.</div>';
       } else {
-        html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
-        periods.forEach(function (p) {
+        // مع فلتر «المتاحة فقط»: تُخفى الشرائح المحجوزة كلياً (عدا
+        // المختارة منها — لتُبقى قابلة للإلغاء)؛ وإن لم يبقَ شيء
+        // يُطوى اليوم في سطر واحد.
+        var visiblePeriods = periods.filter(function (p) {
           var key = date + '|' + p.id;
-          html += '<button type="button" class="chip cf-period-chip' + (calPicks[key] ? ' active' : '') +
-            '" data-cf-chip-date="' + date + '" data-cf-chip-period="' + UI.escapeHtml(p.id) + '">' +
-            UI.escapeHtml(p.label) + ' <span class="ltr">' + UI.escapeHtml(fmtRange12(p.start, p.end)) + '</span></button>';
+          if (calPicks[key]) return true;
+          if (calFreeOnly && calSlotState(date, p.id).state === 'busy') return false;
+          return true;
         });
-        html += '</div><div class="cf-day-halls">';
-        periods.forEach(function (p) {
-          var key = date + '|' + p.id;
-          if (calPicks[key]) html += calHallRowHtml(calPicks[key]);
-        });
-        html += '</div>';
+        if (!visiblePeriods.length) {
+          html += '<div class="muted">لا فترات حرة في هذا اليوم.</div>';
+        } else {
+          html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+          visiblePeriods.forEach(function (p) {
+            var key = date + '|' + p.id;
+            var st = calSlotState(date, p.id);
+            var stateClass = st.state === 'free' ? ' cf-chip-free' : (st.state === 'partial' ? ' cf-chip-partial' : ' cf-chip-busy');
+            html += '<button type="button" class="chip cf-period-chip' + stateClass + (calPicks[key] ? ' active' : '') +
+              '" data-cf-chip-date="' + date + '" data-cf-chip-period="' + UI.escapeHtml(p.id) + '">' +
+              '<span class="cf-chip-main">' + UI.escapeHtml(p.label) + ' <span class="ltr">' + UI.escapeHtml(fmtRange12(p.start, p.end)) + '</span></span>' +
+              '<span class="cf-chip-status">' + UI.escapeHtml(calSlotStatusText(st)) + '</span></button>';
+          });
+          html += '</div><div class="cf-chip-detail-slot"></div><div class="cf-day-halls">';
+          periods.forEach(function (p) {
+            var key = date + '|' + p.id;
+            if (calPicks[key]) html += calHallRowHtml(calPicks[key]);
+          });
+          html += '</div>';
+        }
       }
       html += '</div>';
       return html;
@@ -1235,6 +1572,11 @@
       var calEl = card.querySelector('#cf-calendar');
       if (!calEl) return;
       calOccupied = buildHallOccupancy(isEdit ? course.id : null);
+      calOccupiedDetail = buildHallOccupancyDetail(isEdit ? course.id : null);
+      calDetailKey = null;
+      // رسالة التعبئة الذكية تُمسح عند أي إعادة رسم (تغيّر السياق).
+      var noteEl = card.querySelector('#cf-cal-smart-note');
+      if (noteEl) { noteEl.textContent = ''; noteEl.hidden = true; }
       var periods = sortedPeriods();
       if (resetSpan) calWeeksShown = calComputeWeeks();
       var startDate = calStartDateVal();
@@ -1296,9 +1638,19 @@
         });
       }
       if (summaryEl) {
+        var remaining = sc > 0 ? sc - picks.length : 0;
         summaryEl.textContent = 'تم اختيار ' + picks.length + ' جلسة' + (sc > 0 ? ' من ' + sc + ' مطلوبة' : '') +
+          (remaining > 0 ? ' — متبقّي ' + remaining : '') +
           (invisible ? ' (منها ' + invisible + ' جلسة بفترات محذوفة غير معروضة)' : '');
         summaryEl.style.color = over ? '#B91C1C' : '';
+      }
+      // زر «إكمال النمط» يظهر فقط عند كشف نمط واضح وجلسات متبقية.
+      var patternBtn = card.querySelector('#cf-cal-pattern');
+      if (patternBtn) {
+        var pattern = calDetectPattern();
+        var showPattern = !!pattern && sc > 0 && picks.length < sc;
+        patternBtn.hidden = !showPattern;
+        if (showPattern) patternBtn.textContent = 'إكمال النمط (' + pattern.label + ')';
       }
       var conflicts = calPickConflicts(picks, isEdit ? course.id : null);
       var blocked = conflicts.length > 0 || over;
@@ -1336,22 +1688,51 @@
 
     var calEl = card.querySelector('#cf-calendar');
     if (calEl) {
-      // النقر على شريحة فترة يبدّل اختيارها جلسةً.
+      // النقر على شريحة فترة يبدّل اختيارها جلسةً؛ والنقر على شريحة
+      // محجوزة كلياً (غير مختارة) يعرض سبب الحجز بدل الاختيار.
       calEl.addEventListener('click', function (e) {
+        // زر «اختيار هذه الفترة» داخل تفاصيل شريحة محجوزة.
+        var detailPick = e.target && e.target.closest ? e.target.closest('[data-cf-detail-pick]') : null;
+        if (detailPick && calEl.contains(detailPick)) {
+          var dpKey = detailPick.getAttribute('data-cf-detail-pick');
+          var dpParts = dpKey.split('|');
+          var dpDate = dpParts[0];
+          var dpPeriod = dpParts[1];
+          if (!calPicks[dpKey]) {
+            calPicks[dpKey] = { date: dpDate, periodId: dpPeriod, hallId: calDefaultHallVal() };
+            var dpChip = calEl.querySelector('[data-cf-chip-date="' + dpDate + '"][data-cf-chip-period="' + dpPeriod + '"]');
+            if (dpChip) dpChip.classList.add('active');
+            var dpDayHalls = calEl.querySelector('[data-cf-date="' + dpDate + '"] .cf-day-halls');
+            if (dpDayHalls) dpDayHalls.insertAdjacentHTML('beforeend', calHallRowHtml(calPicks[dpKey]));
+          }
+          calCloseDetail();
+          calRefreshSummary();
+          return;
+        }
         var chip = e.target && e.target.closest ? e.target.closest('[data-cf-chip-date]') : null;
         if (!chip || !calEl.contains(chip)) return;
         var date = chip.getAttribute('data-cf-chip-date');
         var periodId = chip.getAttribute('data-cf-chip-period');
         var key = date + '|' + periodId;
+        if (!calPicks[key] && chip.classList.contains('cf-chip-busy')) {
+          if (calDetailKey === key) {
+            calCloseDetail();
+          } else {
+            calCloseDetail();
+            calDetailKey = key;
+            var slot = calEl.querySelector('[data-cf-date="' + date + '"] .cf-chip-detail-slot');
+            if (slot) slot.innerHTML = calSlotDetailHtml(date, periodId);
+          }
+          return;
+        }
+        calCloseDetail();
         if (calPicks[key]) {
           delete calPicks[key];
           chip.classList.remove('active');
           var row = calEl.querySelector('[data-cf-hallrow="' + key + '"]');
           if (row && row.parentNode) row.parentNode.removeChild(row);
         } else {
-          var defHallSel = card.querySelector('#cf-cal-defaulthall');
-          var defHall = (defHallSel && defHallSel.value && defHallSel.value !== '__new__') ? defHallSel.value : null;
-          calPicks[key] = { date: date, periodId: periodId, hallId: defHall };
+          calPicks[key] = { date: date, periodId: periodId, hallId: calDefaultHallVal() };
           chip.classList.add('active');
           var dayHalls = calEl.querySelector('[data-cf-date="' + date + '"] .cf-day-halls');
           if (dayHalls) dayHalls.insertAdjacentHTML('beforeend', calHallRowHtml(calPicks[key]));
@@ -1390,15 +1771,32 @@
     var defaultHallSel = card.querySelector('#cf-cal-defaulthall');
     if (defaultHallSel) {
       defaultHallSel.addEventListener('change', function () {
-        if (defaultHallSel.value !== '__new__') return; // تنطبق على الاختيارات الجديدة فقط
-        defaultHallSel.value = '';
-        openQuickAddModal('hall', function (newId) {
-          refreshDirectorySelects();
-          var dh = card.querySelector('#cf-cal-defaulthall');
-          if (dh) dh.value = newId;
-        });
+        if (defaultHallSel.value === '__new__') {
+          defaultHallSel.value = '';
+          openQuickAddModal('hall', function (newId) {
+            refreshDirectorySelects();
+            var dh = card.querySelector('#cf-cal-defaulthall');
+            if (dh) dh.value = newId;
+          });
+          return;
+        }
+        // تغيير القاعة الافتراضية يغيّر حالة التوفر على الشرائح
+        // (القاعة المحددة بدل «أي قاعة حرة») — والاختيارات الحالية
+        // لا تتأثر (القاعة الافتراضية تنطبق على الجديدة فقط).
+        renderCalendar(false);
       });
     }
+    var freeOnlyBtn = card.querySelector('#cf-cal-freeonly');
+    if (freeOnlyBtn) freeOnlyBtn.addEventListener('click', function () {
+      calFreeOnly = !calFreeOnly;
+      freeOnlyBtn.classList.toggle('btn-outline', !calFreeOnly);
+      freeOnlyBtn.setAttribute('aria-pressed', calFreeOnly ? 'true' : 'false');
+      renderCalendar(false);
+    });
+    var smartFillBtn = card.querySelector('#cf-cal-smartfill');
+    if (smartFillBtn) smartFillBtn.addEventListener('click', calSmartFill);
+    var patternBtnEl = card.querySelector('#cf-cal-pattern');
+    if (patternBtnEl) patternBtnEl.addEventListener('click', calCompletePattern);
     var calMoreBtn = card.querySelector('#cf-cal-more');
     if (calMoreBtn) calMoreBtn.addEventListener('click', function () {
       calWeeksShown = Math.min(52, calWeeksShown + 4);
@@ -2377,10 +2775,7 @@
       if (!date || !periodId) { availEl.textContent = ''; return; }
       availEl.textContent = 'جارٍ فحص توفر القاعات…';
       window.TadreebDB.checkHallAvailability(date, periodId).then(function (rows) {
-        var free = rows.filter(function (r) { return r.free; }).map(function (r) { return r.hallName; });
-        var busy = rows.filter(function (r) { return !r.free; }).map(function (r) { return r.hallName + ' (' + r.sessionCourse + ')'; });
-        availEl.textContent = 'متاحة: ' + (free.length ? free.join('، ') : 'لا قاعة حرة') +
-          (busy.length ? ' — مشغولة: ' + busy.join('، ') : '');
+        availEl.innerHTML = hallAvailabilityListHtml(rows);
         // تعطيل القاعات المشغولة في القائمة
         hallSel.querySelectorAll('option[value]').forEach(function (opt) {
           if (!opt.value) return;
