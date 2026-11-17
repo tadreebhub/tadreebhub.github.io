@@ -1,0 +1,167 @@
+rules_version = '2';
+
+// ============================================================
+// تدريب — قواعد أمان Firestore (مشروع moad-training)
+// ============================================================
+// تدفق الإعداد الأولي (bootstrap):
+//   1. قبل وجود أي حساب، يقرأ التطبيق meta/setup (قراءة عامة) ليعرف
+//      إن اكتمل الإعداد. المستند غائب = لم يكتمل.
+//   2. بدر ينشئ حساب المدير الأول من شاشة الإعداد: حساب Auth، ثم
+//      ملف users/{uid} بدور admin (مسموح ذاتياً ما دام الإعداد غير
+//      مكتمل — انظر قاعدة users أدناه)، ثم meta/setup
+//      {setupComplete: true} (الكتابة تتطلب ملف مدير موجوداً،
+//      وهو موجود الآن لأنه أُنشئ في الخطوة نفسها).
+//   3. بعدها يُغلق الباب: الإعداد لا يُعاد، ولا حسابات ذاتية أبداً —
+//      المدير وحده ينشئ الحسابات من شاشة الإدارة.
+// قيد معروف: نافذة الإعداد الأولي (قبل أن ينشئ بدر حسابه) يحميها
+// بوابة setupComplete فقط. إن أكمل شخص آخر الإعداد أولاً، فالاستعادة
+// تكون بحذف meta/setup + المستخدم الدخيل من وحدة تحكم Firebase.
+// الأدوار: admin (مدير) / editor (محرر) / viewer (عارض). العارض
+// يقرأ فقط ولا يكتب أبداً. سجل التدقيق: إنشاء فقط، ولا يُعدَّل أو يُحذف.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- مساعدات ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function profileExists() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return profileExists() && getRole() == 'admin';
+    }
+
+    function isEditor() {
+      return profileExists() && getRole() == 'editor';
+    }
+
+    function canWrite() {
+      return isAdmin() || isEditor();
+    }
+
+    function setupComplete() {
+      return exists(/databases/$(database)/documents/meta/setup) &&
+        get(/databases/$(database)/documents/meta/setup).data.setupComplete == true;
+    }
+
+    // ---------- الإعداد (meta/setup) ----------
+    // القراءة عامة: التطبيق يحتاجها قبل تسجيل الدخول ليعرف إن كان
+    // الإعداد الأولي مطلوباً.
+    match /meta/setup {
+      allow read: if true;
+      // الإنشاء: مدير مسجّل دخوله وملفه موجود (يحدث في الإعداد الأولي
+      // بعد إنشاء ملف المدير مباشرة).
+      allow create: if isAdmin();
+      // التحديث: مدير فقط، ومن «غير مكتمل» إلى «مكتمل» فقط — لا رجوع.
+      allow update: if isAdmin()
+        && resource.data.setupComplete == false
+        && request.resource.data.setupComplete == true;
+      allow delete: if false;
+    }
+    // أي مستند meta آخر: مغلق تماماً.
+    match /meta/{other} {
+      allow read, write: if false;
+    }
+
+    // ---------- المستخدمون ----------
+    match /users/{userId} {
+      // القراءة: ملفي الشخصي، أو المدير يقرأ الجميع.
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // الإنشاء: مدير فقط — إلا الإنشاء الذاتي في الإعداد الأولي:
+      // المستخدم ينشئ ملفه هو، بدور admin، ما دام الإعداد غير مكتمل.
+      allow create: if isAdmin()
+        || (isSignedIn()
+            && request.auth.uid == userId
+            && !setupComplete()
+            && request.resource.data.role == 'admin');
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- بيانات المنصة ----------
+    // القراءة لأي مسجّل دخول (كل الأدوار)؛ الكتابة للمدير والمحرر فقط.
+    match /courses/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+
+      // حضور الجلسة (مجموعة فرعية).
+      match /attendance/{traineeId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if canWrite();
+      }
+    }
+
+    match /trainees/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /trainers/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /directorates/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /halls/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /periods/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /holidays/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /expenses/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /budgetCategories/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    // ---------- الملاحظات (Badr 17:36: ملاحظة على أي شيء) ----------
+    match /notes/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if canWrite();
+    }
+
+    // ---------- سجل التدقيق ----------
+    // الإنشاء لأي مسجّل دخول؛ القراءة للمدير فقط؛ لا تعديل ولا حذف أبداً.
+    match /audit/{docId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ---------- رفض افتراضي لكل ما عداه ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

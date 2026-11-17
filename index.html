@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#081F31">
+<meta name="description" content="منصة إدارة البرامج التدريبية — وزارة التنمية الإدارية">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>تدريب</title>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/export.css">
+<style>
+@font-face{font-family:'PlexAR';src:url('fonts/IBM-Plex-Sans-Arabic-600.ttf') format('truetype');font-weight:600;font-display:swap}
+</style>
+</head>
+<body>
+
+<!-- ============ التحميل الأولي ============ -->
+<div id="boot-view">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-wordmark">تدريب</div>
+      <div class="login-tag">إدارة الدورات التدريبية</div>
+      <div class="loading-state"><span class="spinner"></span><div style="margin-top:14px">جارٍ التحميل…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ تعذّر الاتصال ============ -->
+<div id="offline-view" hidden>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-wordmark">تدريب</div>
+      <div class="error-view">
+        <div class="error-title">تعذّر الاتصال</div>
+        <p>تعذّر الوصول إلى قاعدة البيانات — تحقق من الاتصال بالإنترنت ثم أعد المحاولة.</p>
+        <button class="btn" type="button" id="offline-retry-btn">إعادة المحاولة</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ تسجيل الدخول ============ -->
+<section id="screen-login" class="screen" hidden>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-wordmark">تدريب</div>
+      <div class="login-tag">إدارة الدورات التدريبية</div>
+      <div class="form-error" id="login-error"></div>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="login-username">اسم المستخدم</label>
+          <input id="login-username" name="username" type="text" placeholder="اسم المستخدم" autocomplete="username" dir="ltr" style="text-align:right">
+        </div>
+        <div class="field">
+          <label for="login-password">كلمة المرور</label>
+          <input id="login-password" name="password" type="password" placeholder="كلمة المرور" autocomplete="current-password">
+        </div>
+        <button id="login-btn" class="btn btn-block" type="submit">تسجيل الدخول</button>
+      </form>
+      <div class="login-note">الدخول متاح للحسابات المعتمدة من الإدارة فقط</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ الإعداد الأولي ============ -->
+<section id="screen-setup" class="screen" hidden>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-wordmark">تدريب</div>
+      <div class="login-tag">الإعداد الأولي — إنشاء حساب المدير</div>
+      <p class="muted" style="text-align:right">لم يتم إعداد المنصة بعد. أنشئ حساب المدير الأول للبدء — سيُستخدم هذا الحساب لإدارة المنصة وإنشاء بقية الحسابات.</p>
+      <div class="form-error" id="setup-error"></div>
+      <form id="setup-form" novalidate>
+        <div class="field">
+          <label for="setup-username">اسم المستخدم</label>
+          <input id="setup-username" name="username" type="text" placeholder="مثال: admin" autocomplete="username" dir="ltr" style="text-align:right">
+          <div class="field-hint">من 3 إلى 30 حرفاً: أحرف لاتينية وأرقام ونقطة وشرطة سفلية وشرطة فقط.</div>
+        </div>
+        <div class="field">
+          <label for="setup-password">كلمة المرور</label>
+          <input id="setup-password" name="password" type="password" placeholder="8 أحرف على الأقل" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label for="setup-password-confirm">تأكيد كلمة المرور</label>
+          <input id="setup-password-confirm" name="passwordConfirm" type="password" placeholder="أعد كتابة كلمة المرور" autocomplete="new-password">
+        </div>
+        <button id="setup-btn" class="btn btn-block" type="submit">إنشاء حساب المدير والبدء</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ============ هيكل التطبيق ============ -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="wordmark">تدريب</div>
+    <div class="user">
+      <span class="uname" id="topbar-username"></span>
+      <span class="role-pill" id="topbar-role"></span>
+      <button class="btn-light" type="button" id="lock-btn">قفل</button>
+      <button class="btn-light" type="button" id="logout-btn">تسجيل الخروج</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-label">القائمة الرئيسية</div>
+      <nav id="main-nav">
+        <button class="nav-link" type="button" data-screen="dashboard">لوحة المعلومات</button>
+        <button class="nav-link" type="button" data-screen="courses">الدورات</button>
+        <button class="nav-link" type="button" data-screen="calendar">رزنامة القاعات</button>
+        <button class="nav-link" type="button" data-screen="directory">الدليل</button>
+        <button class="nav-link" type="button" data-screen="admin" id="nav-admin" hidden>الإدارة</button>
+      </nav>
+    </aside>
+    <main class="main" id="main-container">
+      <div class="loading-state" id="main-loading"><span class="spinner"></span><div style="margin-top:14px">جارٍ تحميل البيانات…</div></div>
+      <div id="screen-container"></div>
+    </main>
+  </div>
+  <footer class="app-footer">تدريب · نظام إدارة الدورات التدريبية · للاستخدام الداخلي فقط</footer>
+</div>
+
+<!-- ============ قفل الشاشة ============ -->
+<div id="lock-overlay" class="lock-overlay" hidden>
+  <div class="lock-card">
+    <div class="login-wordmark">تدريب</div>
+    <div class="login-tag">تم قفل المنصة بعد فترة من عدم النشاط</div>
+    <div class="form-error" id="lock-error"></div>
+    <form id="lock-form" novalidate>
+      <div class="field">
+        <label for="lock-password">كلمة المرور</label>
+        <input id="lock-password" name="password" type="password" placeholder="كلمة المرور" autocomplete="current-password">
+      </div>
+      <button id="lock-btn-submit" class="btn btn-block" type="submit">فتح القفل</button>
+    </form>
+    <div style="margin-top:16px"><button class="link-btn" type="button" id="lock-logout-btn">تسجيل الخروج بدلاً من ذلك</button></div>
+  </div>
+</div>
+
+<!-- ============ حاويات عامة ============ -->
+<div id="modal-root"></div>
+<div id="toast-container" aria-live="polite"></div>
+
+<!-- ============ السكربتات (ترتيب التحميل مهم) ============ -->
+<script src="vendor/firebase-app-compat.js"></script>
+<script src="vendor/firebase-auth-compat.js"></script>
+<script src="vendor/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script src="js/firebase-init.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/db.js"></script>
+<script src="js/notes.js"></script>
+<script src="vendor/exceljs.min.js"></script>
+<script src="js/export.js"></script>
+<script src="js/ui-helpers.js"></script>
+<script src="js/app.js"></script>
+<script src="js/screens-dashboard.js"></script>
+<script src="js/screens-courses.js"></script>
+<script src="js/screens-calendar.js"></script>
+<script src="js/screens-directory.js"></script>
+<script src="js/screens-admin.js"></script>
+<script src="js/screens-session.js"></script>
+<script>
+(function () {
+  'use strict';
+  // تسجيل عامل الخدمة (PWA) — لا يكسر التطبيق أبداً عند الفشل.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      try {
+        navigator.serviceWorker.register('sw.js').catch(function (err) {
+          if (window.console) console.warn('[تدريب] تعذّر تسجيل عامل الخدمة:', err && err.message);
+        });
+      } catch (err) {
+        if (window.console) console.warn('[تدريب] تعذّر تسجيل عامل الخدمة:', err && err.message);
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>
