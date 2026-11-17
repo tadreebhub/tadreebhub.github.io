@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com wss://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="theme-color" content="#081F31">
 <meta name="description" content="منصة إدارة البرامج التدريبية — وزارة التنمية الإدارية">
 <link rel="manifest" href="manifest.json">
@@ -81,7 +83,7 @@
         </div>
         <div class="field">
           <label for="setup-password">كلمة المرور</label>
-          <input id="setup-password" name="password" type="password" placeholder="8 أحرف على الأقل" autocomplete="new-password">
+          <input id="setup-password" name="password" type="password" placeholder="10 أحرف على الأقل، مع حرف ورقم" autocomplete="new-password">
         </div>
         <div class="field">
           <label for="setup-password-confirm">تأكيد كلمة المرور</label>
@@ -113,6 +115,7 @@
         <button class="nav-link" type="button" data-screen="calendar">رزنامة القاعات</button>
         <button class="nav-link" type="button" data-screen="directory">الدليل</button>
         <button class="nav-link" type="button" data-screen="admin" id="nav-admin" hidden>الإدارة</button>
+        <button class="nav-link" type="button" data-screen="settings" id="nav-settings" hidden>الإعدادات</button>
       </nav>
     </aside>
     <main class="main" id="main-container">
@@ -163,22 +166,6 @@
 <script src="js/screens-directory.js"></script>
 <script src="js/screens-admin.js"></script>
 <script src="js/screens-session.js"></script>
-<script>
-(function () {
-  'use strict';
-  // تسجيل عامل الخدمة (PWA) — لا يكسر التطبيق أبداً عند الفشل.
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-      try {
-        navigator.serviceWorker.register('sw.js').catch(function (err) {
-          if (window.console) console.warn('[تدريب] تعذّر تسجيل عامل الخدمة:', err && err.message);
-        });
-      } catch (err) {
-        if (window.console) console.warn('[تدريب] تعذّر تسجيل عامل الخدمة:', err && err.message);
-      }
-    });
-  }
-})();
-</script>
+<script src="js/sw-register.js"></script>
 </body>
 </html>
