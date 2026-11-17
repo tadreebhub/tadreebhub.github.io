@@ -358,3 +358,255 @@ body.density-compact .list-row{padding:8px 0}
 .cf-day-summary{font-size:13px}
 .cf-chip-detail{background:#F8FAFC;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;font-size:13px}
 .cf-detail-row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;flex-wrap:wrap}
+
+/* ---------- رزنامة القاعات (v2.3 — W1: جدول اليوم قاعات × فترات + أسبوع و شهر أغنى) ---------- */
+.table-wrap table.cal-day-table{min-width:0;table-layout:fixed;width:100%}
+.cal-day-table th,.cal-day-table td{vertical-align:top;padding:8px 6px;overflow-wrap:anywhere}
+.cal-day-table thead th{text-align:center}
+.cal-day-table thead th:first-child{width:96px}
+.cal-day-table .cal-day-period-time{font-size:12px;color:var(--muted);font-weight:400}
+.cal-day-table .cal-day-period-time .ltr{white-space:normal}
+.cal-day-hall{color:var(--navy);text-align:right}
+.cal-day-hall .cal-hall-type{font-size:12px;color:var(--muted);font-weight:400;white-space:nowrap}
+.cal-day-hall.cal-nohall{color:var(--muted);font-weight:400}
+.cal-cell{border-radius:8px;padding:6px 8px;font-size:13px;line-height:1.5}
+.cal-cell + .cal-cell{margin-top:6px}
+.cal-cell-session{background:#E8EEF3;color:var(--navy);cursor:pointer}
+.cal-cell-session:hover{background:#D3DEE7}
+.cal-cell-meeting{background:var(--violetbg);color:var(--violet);cursor:pointer}
+.cal-cell-meeting:hover{background:#DDD6FE}
+.cal-cell-title{font-weight:600}
+.cal-cell-sub{font-size:12px;color:var(--muted)}
+.cal-cell-pill{display:inline-block;background:var(--navy);color:#fff;border-radius:999px;padding:0 8px;font-size:11px;line-height:1.8;margin-top:4px}
+.cal-day-free{cursor:pointer}
+.cal-day-free:hover{background:var(--greenbg)}
+.cal-free{color:var(--green);font-size:13px}
+.cal-free-none{color:var(--grey)}
+.cal-book-link{display:block;font-size:12px;color:var(--accent);text-decoration:underline;margin-top:2px}
+.cal-other-title{margin:4px 0;color:var(--navy);font-size:15px;font-weight:600}
+.cal-hl-sub{font-size:11.5px;color:var(--muted);line-height:1.4}
+.cal-week-summary{font-size:12px;color:var(--green);font-weight:400;margin-top:2px}
+.cal-week-summary.cal-week-full{color:var(--amber)}
+.cal-month-summary{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:2px}
+.cal-month-dots{display:flex;gap:4px;margin:2px 0 4px}
+.cal-month-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.cal-month-dot.free{background:var(--green)}
+.cal-month-dot.busy{background:var(--navy)}
+.cal-weekend-tag{font-size:11px;color:var(--amber);line-height:1.5}
+td[data-cal-day-open]{cursor:pointer}
+.cal-range-day-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer}
+.cal-day-open-hint{font-size:12px;color:var(--accent)}
+.cal-range-day-head:hover .cal-day-open-hint{text-decoration:underline}
+@media (max-width:720px){
+  .cal-day-table th,.cal-day-table td{padding:6px 4px;font-size:12px}
+  .cal-day-table thead th:first-child{width:72px}
+  .cal-cell{padding:5px 6px;font-size:12px}
+  .cal-month-summary{font-size:10.5px}
+}
+/* ---------- شبكة رزنامة اختيار الجلسات (v2.3 — W2) ---------- */
+.cf-grid-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.cf-grid-nav .btn{min-height:34px;padding:4px 10px}
+.cf-grid-title{flex:1;text-align:center;min-width:110px;color:var(--navy)}
+.cf-grid-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:4px}
+.cf-grid-weekday{text-align:center;font-size:11px;font-weight:700;color:#475569;padding:2px 0;min-width:0;overflow:hidden;white-space:nowrap}
+.cf-month-cells{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cf-grid-blank{min-width:0}
+.cf-grid-day{min-width:0;min-height:54px;padding:4px 2px;border:1px solid #E2E8F0;border-radius:8px;background:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:13px;line-height:1.3;color:var(--navy);box-sizing:border-box}
+.cf-grid-day:hover{border-color:#94A3B8}
+.cf-day-num{font-weight:700;font-size:14px}
+.cf-day-dots{display:flex;gap:3px;min-height:7px}
+.cf-dot{width:7px;height:7px;border-radius:50%;flex:none}
+.cf-dot-free{background:#2E7D32}
+.cf-dot-partial{background:#B45309}
+.cf-dot-busy{background:#CBD5E1}
+.cf-day-tag{font-size:11px;color:#92400E;font-weight:600}
+.cf-day-pickcount{font-size:11px;font-weight:700;color:var(--navy)}
+.cf-day-free{background:#F0FDF4;border-color:#BBF7D0}
+.cf-day-partial{background:#FFFBEB;border-color:#FDE68A}
+.cf-day-busy{background:#F1F5F9;border-color:#E2E8F0;color:#64748B}
+.cf-day-holiday{background:#FEF3C7;border-color:#FDE68A}
+.cf-day-weekend{background:#F8FAFC;border-color:#E2E8F0;border-style:dashed;color:#64748B}
+.cf-day-none{background:#fff}
+.cf-day-today{box-shadow:inset 0 -3px 0 #C9A86A}
+.cf-day-expanded{border:2px solid var(--navy);padding:3px 1px}
+.cf-day-selected{outline:2px solid var(--navy);outline-offset:-2px}
+.cf-day-selected .cf-day-pickcount{color:var(--navy)}
+.cf-day-filtered{opacity:.45}
+.cf-day-panel{border:1px solid var(--navy);border-radius:10px;padding:12px;margin-top:12px;background:#fff}
+.cf-panel-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.cf-panel-head .cf-panel-close{margin-inline-start:auto}
+@media (max-width:480px){
+  .cf-grid-day{min-height:50px}
+  .cf-day-num{font-size:13px}
+  .cf-grid-weekday{font-size:10px}
+}
+/* ===== v2.3 TYPES-WEEKEND (W3) ===== */
+.pill-gold{background:#F7EFDA;color:#7A5C14}
+#settings-weekend-picker{display:flex;flex-wrap:wrap;gap:6px}
+/* ===== v2.3 MOVES-MERGE (W4) — نقل/دمج/تأجيل/حضور ===== */
+.att-choice.sel-cancelled{background:var(--greybg);border-color:var(--grey);color:var(--grey)}
+.att-legacy{margin-top:6px}
+.att-lock-note{background:var(--greybg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:16px;color:var(--navy)}
+.hall-type-warn{background:var(--amberbg);border:1px solid var(--amber);border-radius:10px;padding:12px 14px;margin-top:12px;color:var(--ink)}
+.sess-holiday-banner{background:var(--amberbg);border:1px solid var(--amber);border-radius:10px;padding:12px 14px;margin-bottom:18px;color:var(--ink)}
+.pp-chips{display:flex;gap:8px;flex-wrap:wrap}
+.pp-chip{border:1px solid #CBD5E1;background:#fff;border-radius:10px;padding:8px 12px;cursor:pointer;text-align:right;min-width:0}
+.pp-chip-label{display:block;font-weight:700;color:var(--navy);font-size:14px}
+.pp-chip-status{display:block;font-size:12px;color:var(--green)}
+.pp-chip.busy .pp-chip-status{color:var(--red)}
+.pp-chip.active{border-color:var(--navy);box-shadow:0 0 0 1px var(--navy)}
+.pp-hall-list{margin-top:8px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.pp-auto-result{margin-top:12px}
+.pp-auto-found{background:var(--greenbg);border:1px solid var(--green);border-radius:10px;padding:12px 14px}
+.pp-auto-none{background:var(--greybg);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+/* ===== v2.3 CHARTS + TOOLS + POLISH (W5) ===== */
+/* --- الرسوم البيانية التفاعلية (SVG داخل المنصة، بلا مكتبات) --- */
+.stats-charts{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+.chart-block{border:1px solid var(--line-soft);border-radius:10px;padding:14px 16px;background:var(--card-grey);min-width:0}
+.chart-title{font-size:15px;margin:0 0 10px;color:var(--navy)}
+.chart-svg{display:block;width:100%;height:auto;min-width:0;direction:ltr}
+/* ملاحظة: اتجاه ltr للـ SVG فقط حتى يعمل text-anchor="end" كما هو
+ * متوقع (في RTL يقلب الطرف فيمتد النص خارج العرض ويُقصّ)؛ تشكيل
+ * الحروف العربية داخل النص نفسه لا يتأثر. */
+.chart-label{font-size:12px;fill:#334155;font-family:Tahoma,'Segoe UI',Arial,sans-serif}
+.chart-value{font-size:11px;fill:var(--navy);font-weight:600}
+.chart-value-in{fill:#fff}
+.chart-axis{stroke:#E2E8F0;stroke-width:1}
+.chart-grid{stroke:#EDF1F5;stroke-width:1}
+.chart-axis-label{font-size:10px;fill:var(--muted);font-family:Tahoma,'Segoe UI',Arial,sans-serif}
+.chart-item{cursor:pointer;outline:none}
+.chart-item:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.chart-bar{transform:scaleX(0);transform-box:fill-box;transform-origin:right center;transition:transform .6s ease}
+.chart-in .chart-bar{transform:scaleX(1)}
+.chart-bar-row .chart-value,.chart-bar-row .chart-label{opacity:0;transition:opacity .4s ease}
+.chart-in .chart-bar-row .chart-value,.chart-in .chart-bar-row .chart-label{opacity:1}
+.chart-bar-row.sel .chart-bar,.chart-bar-row.hov .chart-bar{stroke:var(--gold);stroke-width:2}
+.chart-seg{transition:stroke-dasharray .7s ease,stroke-dashoffset .7s ease,stroke-width .15s ease;stroke-dasharray:0 100;stroke-dashoffset:0}
+.chart-in .chart-seg{stroke-dasharray:var(--fd);stroke-dashoffset:var(--fo)}
+.chart-seg.sel,.chart-seg.hov{stroke-width:31}
+.chart-donut-total{font-size:15px;font-weight:700;fill:var(--navy);font-family:'PlexAR',Tahoma,sans-serif;pointer-events:none}
+.chart-donut-total-label{font-size:10px;fill:var(--muted);pointer-events:none}
+.chart-donut-wrap{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.chart-svg-donut{width:150px;flex:none}
+.chart-legend{list-style:none;margin:0;padding:0;flex:1;min-width:140px;display:flex;flex-direction:column;gap:6px}
+.chart-legend-item{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;font-size:13px;min-height:36px}
+.chart-legend-item:hover{background:#EDF1F5}
+.chart-legend-item.sel,.chart-legend-item.hov{background:#E8EEF3;outline:1px solid var(--gold)}
+.chart-dot{width:11px;height:11px;border-radius:50%;flex:none}
+.chart-legend-label{flex:1;min-width:0;overflow-wrap:anywhere}
+.chart-legend-value{font-weight:600;color:var(--navy);white-space:nowrap}
+.chart-line-path{stroke:var(--navy);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;transition:stroke-dashoffset .9s ease}
+.chart-area{fill:rgba(8,31,49,.07);opacity:0;transition:opacity .6s ease .4s}
+.chart-in .chart-area{opacity:1}
+.chart-point{opacity:0;transition:opacity .3s ease}
+.chart-in .chart-point{opacity:1}
+.chart-hit{fill:transparent}
+.chart-dot-pt{fill:#fff;stroke:var(--navy);stroke-width:2}
+.chart-point.sel .chart-dot-pt,.chart-point.hov .chart-dot-pt{fill:var(--gold);stroke:var(--navy);r:5.5}
+.chart-detail{margin-top:10px;font-size:13px;color:var(--navy);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-height:36px;display:flex;align-items:center}
+.chart-empty{padding:8px 0}
+.chart-drill{margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.chart-drill-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;color:var(--navy);font-size:14px}
+.chart-drill-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.chart-drill-list li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:13px}
+.chart-drill-list li:last-child{border-bottom:none}
+.chart-drill-desc{flex:1;min-width:120px;overflow-wrap:anywhere}
+.chart-drill-date{font-size:12px}
+.chart-drill-amount{font-weight:600;color:var(--navy);white-space:nowrap}
+.chart-drill-total{margin-top:8px;text-align:left;font-weight:700;color:var(--navy);font-size:14px}
+
+/* --- توحيد الأدوات (W5 — G): أشرطة أدوات وعناوين أقسام متسقة --- */
+.head-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.head-actions .btn{white-space:nowrap}
+.tools-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toolbar .btn-sm,.head-actions .btn-sm{min-height:36px;display:inline-flex;align-items:center;justify-content:center}
+.section-title-row .head-actions{margin:0}
+.row-actions{gap:8px;align-items:center}
+.row-actions .btn{min-height:36px}
+.btn-stack{margin-top:6px}
+
+/* --- تلميع المنصة (W5 — K): إيقاع أضيق وحركات خفيفة للهيكل المشترك ---
+ * الهيكل فقط (ترويسة/تنقل/بطاقات/أزرار/قوائم/نوافذ/نماذج/عناوين)؛
+ * لا إعادة تصميم ولا تغيير تدفقات. العناصر التفاعلية تبقى ≥36px،
+ * والنص ≥13px. كل الحركات transform/opacity فقط. */
+.card,.card-white{padding:18px;margin-bottom:14px}
+.stats{gap:12px;margin-bottom:14px}
+.stat{padding:16px 18px}
+.stat-num{font-size:28px}
+.section-title-row{margin-bottom:10px}
+h1{font-size:24px}
+h2{font-size:18px;margin-bottom:10px}
+h3{font-size:15px}
+.toolbar{margin-bottom:12px}
+.list-row{padding:11px 0}
+.session-item{padding:11px 0}
+.nav-link{padding:10px 14px}
+.sidebar{padding:14px 12px}
+.field{margin-bottom:13px}
+.field input,.field select,.field textarea{padding:10px 12px}
+th,td{padding:10px 12px}
+.person{padding:14px;margin-bottom:10px}
+.meta-box{padding:12px 14px}
+.empty-state{padding:28px 20px}
+.loading-state{padding:36px 20px}
+.app-footer{padding:14px 32px}
+@media (min-width:721px){
+  .main{padding:22px 28px}
+  .page-head{margin-bottom:16px}
+  .modal-card{padding:22px 24px}
+  .topbar{padding:0 20px}
+}
+.modal-actions{margin-top:18px}
+/* ظهور خفيف عند تبديل الشاشات (أبناء حاوية الشاشة يُعاد إنشاؤهم
+ * مع كل رسم فيُعاد تشغيل الحركة) + شاشتا الدخول والإعداد. */
+.screen.active,#screen-container>*{animation:td-fade-in .25s ease}
+@keyframes td-fade-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.modal-overlay{animation:td-fade-in .18s ease}
+.modal-card{animation:td-pop .2s ease}
+@keyframes td-pop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+.toast{animation:td-toast-in .25s ease}
+@keyframes td-toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.btn{transition:background .15s ease,box-shadow .15s ease,transform .12s ease}
+.btn:active{transform:scale(.97)}
+.nav-link{transition:background .15s ease,color .15s ease,transform .12s ease}
+.list-row.clickable,.session-item.clickable,tbody tr.clickable{transition:background .15s ease}
+.card-white,.card,.stat{transition:box-shadow .2s ease}
+
+/* --- حركة مخفّضة: استعلام واحد يعطّل كل حركات W5 (رسوم + تلميع) --- */
+@media (prefers-reduced-motion: reduce){
+  .chart-bar,.chart-bar-row .chart-value,.chart-bar-row .chart-label,.chart-seg,.chart-line-path,.chart-area,.chart-point,.btn,.nav-link,.list-row.clickable,.session-item.clickable,tbody tr.clickable,.card-white,.card,.stat{transition:none!important}
+  .screen.active,#screen-container>*,.modal-overlay,.modal-card,.toast,.spinner{animation:none!important}
+  .btn:active{transform:none}
+}
+/* ---------- التنبيهات والتغييرات (v2.3 — W6) ---------- */
+.notif-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
+.notif-filters .field{flex:1 1 160px;min-width:0;margin-bottom:0}
+#notif-count{margin-top:12px}
+.notif-row.is-new{background:var(--gold-soft);border-radius:8px;padding-inline:10px}
+.notif-new{background:var(--gold);color:var(--navy);font-weight:600}
+.notif-restricted{background:var(--amberbg);border:1px solid #FCD34D;border-radius:10px;padding:14px 16px;color:var(--ink)}
+@media (max-width:720px){
+  .notif-filters .field{flex:1 1 100%}
+}
+/* ===== v2.3 EXCEL (W7) — استيراد المتدربين من إكسل ===== */
+.excel-import{margin-top:10px}
+.excel-import .field-hint{margin-top:6px}
+.excel-import-summary{margin-top:10px;background:#F8FAFC;border:1px solid #CBD5E1;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.7}
+.excel-import-summary .excel-import-counts{font-weight:700;color:#081F31}
+.excel-import-summary .excel-import-added{color:#2E7D32}
+.excel-import-summary .excel-import-skipped{color:#911B17}
+.excel-import-summary ul{margin:8px 0 0;padding-inline-start:18px}
+.excel-import-summary li{margin-bottom:4px;overflow-wrap:anywhere}
+@media (max-width:480px){.excel-import-summary{font-size:13px;padding:10px 12px}}
+/* ===== v2.3 GROUPS (W8) — display name subtitle, auto-name preview, directorate import ===== */
+.group-auto-subtitle{font-size:12px;color:#5B6B78;margin-top:2px;overflow-wrap:anywhere}
+.group-auto-preview{background:#F2F6F8;border-inline-start:3px solid #C9A86A;border-radius:8px;padding:8px 12px;font-size:13px;color:#33475A;margin-top:6px;overflow-wrap:anywhere}
+.group-auto-preview .k{font-weight:700;color:#081F31}
+.dir-import-row{display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center}
+.dir-import-summary{margin-top:10px}
+@media (max-width:480px){.dir-import-row .btn{padding:6px 10px;font-size:13px}}
+/* ===== v2.3 INTEGRATION (coordinator) — toolbar selects must never exceed the viewport ===== */
+/* The calendar course filter now shows long group display names; a <select> sizes to its
+   longest option, which overflowed 390px screens by ~41px. Cap toolbar selects at the
+   container width (the dropdown still shows full option text when opened). */
+.toolbar select.input{min-width:0;max-width:100%}
