@@ -342,3 +342,19 @@ body.density-compact .track-row{padding:8px 0}
   .list-row-actions{width:100%;justify-content:flex-start}
 }
 body.density-compact .list-row{padding:8px 0}
+
+/* ---------- الرزنامة الذكية (v2.2) ---------- */
+.cf-cal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.cf-period-chip{display:inline-flex;flex-direction:column;align-items:center;gap:2px;text-align:center;line-height:1.5;max-width:100%;padding:8px 14px}
+.cf-chip-main{font-size:14px}
+.cf-chip-status{font-size:12px;font-weight:600}
+.cf-chip-free{background:var(--greenbg);border-color:#A5D6A7}
+.cf-chip-free .cf-chip-status{color:var(--green)}
+.cf-chip-partial{background:var(--amberbg);border-color:#FCD34D}
+.cf-chip-partial .cf-chip-status{color:var(--amber)}
+.cf-chip-busy{background:#F1F5F9;border-color:#CBD5E1}
+.cf-chip-busy .cf-chip-status{color:var(--red)}
+.cf-period-chip.active .cf-chip-main,.cf-period-chip.active .cf-chip-status{color:#fff}
+.cf-day-summary{font-size:13px}
+.cf-chip-detail{background:#F8FAFC;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;font-size:13px}
+.cf-detail-row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;flex-wrap:wrap}
