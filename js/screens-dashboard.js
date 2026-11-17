@@ -27,82 +27,103 @@
     var traineesCount = Store.getAll('trainees').length;
 
     var upcoming = sessions.filter(function (s) {
-      return s.date > today && s.state !== 'cancelled';
+      return s.date > today && s.state !== 'cancelled' && s.state !== 'holiday';
     }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).slice(0, 8);
+
+    // بطاقات لوحة التحكم الظاهرة (من إعدادات العرض — الافتراضي: الكل ظاهر).
+    var cardPrefs = null;
+    try {
+      if (window.UI && typeof UI.getSetting === 'function') cardPrefs = UI.getSetting('dashboardCards', null);
+    } catch (e) { cardPrefs = null; }
+    if (!cardPrefs) cardPrefs = { stats: true, today: true, weekAttendance: true, upcoming: true, progress: true, tracker: true };
+    function showCard(key) { return cardPrefs[key] !== false; }
 
     var html = '';
     html += '<div class="page-head"><div><h1>لوحة المعلومات</h1>' +
       '<div class="muted">' + UI.escapeHtml(UI.fmtDateFull(new Date())) + '</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="dash-export-btn">تصدير إكسل ↓</button></div></div>';
 
-    html += '<div class="stats">' +
-      '<div class="stat"><div class="stat-num">' + UI.fmtNumber(activeCourses.length) + '</div><div class="stat-label">دورات نشطة</div></div>' +
-      '<div class="stat"><div class="stat-num">' + UI.fmtNumber(todaySessions.length) + '</div><div class="stat-label">جلسات اليوم</div></div>' +
-      '<div class="stat"><div class="stat-num" id="dash-week-rate">—</div><div class="stat-label">نسبة الحضور هذا الأسبوع</div></div>' +
-      '<div class="stat"><div class="stat-num">' + UI.fmtNumber(traineesCount) + '</div><div class="stat-label">متدرب مسجل</div></div>' +
-      '</div>';
-
-    html += '<div class="cols">';
-    // جلسات اليوم
-    html += '<div class="card"><h2>جلسات اليوم</h2>';
-    if (!todaySessions.length) {
-      html += UI.emptyState('لا جلسات اليوم', 'لا توجد جلسات مجدولة لهذا اليوم.');
-    } else {
-      todaySessions.forEach(function (s) {
-        var course = Store.get('courses', s.courseId);
-        var period = Store.get('periods', s.periodId);
-        html += '<div class="session-item clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
-          '<div><strong>' + UI.escapeHtml(course ? course.name : '') + '</strong>' +
-          '<div class="muted">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') +
-          ' · ' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') +
-          ' ' + UI.pillForSessionState(s.state) + '</div></div>' +
-          '<div class="session-time ltr">' + UI.escapeHtml(period ? period.start : '') + '</div></div>';
-      });
+    if (showCard('stats')) {
+      html += '<div class="stats">' +
+        '<div class="stat"><div class="stat-num">' + UI.fmtNumber(activeCourses.length) + '</div><div class="stat-label">دورات نشطة</div></div>' +
+        '<div class="stat"><div class="stat-num">' + UI.fmtNumber(todaySessions.length) + '</div><div class="stat-label">جلسات اليوم</div></div>' +
+        '<div class="stat"><div class="stat-num" id="dash-week-rate">—</div><div class="stat-label">نسبة الحضور هذا الأسبوع</div></div>' +
+        '<div class="stat"><div class="stat-num">' + UI.fmtNumber(traineesCount) + '</div><div class="stat-label">متدرب مسجل</div></div>' +
+        '</div>';
     }
-    html += '</div>';
+
+    // جلسات اليوم + ملخص الحضور هذا الأسبوع (داخل صف .cols واحد؛
+    // يُبنى الصف فقط عند ظهور إحدى البطاقتين على الأقل).
+    var todayHtml = '';
+    if (showCard('today')) {
+      todayHtml += '<div class="card"><h2>جلسات اليوم</h2>';
+      if (!todaySessions.length) {
+        todayHtml += UI.emptyState('لا جلسات اليوم', 'لا توجد جلسات مجدولة لهذا اليوم.');
+      } else {
+        todaySessions.forEach(function (s) {
+          var course = Store.get('courses', s.courseId);
+          var period = Store.get('periods', s.periodId);
+          todayHtml += '<div class="session-item clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
+            '<div><strong>' + UI.escapeHtml(course ? course.name : '') + '</strong>' +
+            '<div class="muted">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') +
+            ' · ' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') +
+            ' ' + UI.pillForSessionState(s.state) + '</div></div>' +
+            '<div class="session-time ltr">' + UI.escapeHtml(period ? period.start : '') + '</div></div>';
+        });
+      }
+      todayHtml += '</div>';
+    }
 
     // ملخص الحضور هذا الأسبوع
-    html += '<div class="card"><h2>ملخص الحضور هذا الأسبوع</h2><div id="dash-week-attendance">' +
-      UI.loadingState('جارٍ تحميل الحضور…') + '</div></div>';
-    html += '</div>';
+    var weekHtml = '';
+    if (showCard('weekAttendance')) {
+      weekHtml += '<div class="card"><h2>ملخص الحضور هذا الأسبوع</h2><div id="dash-week-attendance">' +
+        UI.loadingState('جارٍ تحميل الحضور…') + '</div></div>';
+    }
+    if (todayHtml || weekHtml) html += '<div class="cols">' + todayHtml + weekHtml + '</div>';
 
     // الجلسات القادمة
-    html += '<div class="card"><h2>الجلسات القادمة</h2>';
-    if (!upcoming.length) {
-      html += UI.emptyState('لا جلسات قادمة', 'لا توجد جلسات مجدولة في الأيام القادمة.');
-    } else {
-      html += '<div class="table-wrap"><table class="t-compact"><thead><tr><th>الدورة</th><th>التاريخ</th><th>الوقت</th><th class="hide-m">القاعة</th><th class="hide-m">المدرب</th></tr></thead><tbody>';
-      upcoming.forEach(function (s) {
-        var course = Store.get('courses', s.courseId);
-        var period = Store.get('periods', s.periodId);
-        html += '<tr class="clickable" data-session-open="' + UI.escapeHtml(s.id) + '"><td>' +
-          UI.escapeHtml(course ? course.name : '') + '</td><td>' +
-          UI.escapeHtml(UI.fmtDateFull(s.date)) + '</td><td>' +
-          (period ? UI.fmtTimeRange(period.start, period.end) : '') + '</td>' +
-          '<td class="hide-m">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') + '</td>' +
-          '<td class="hide-m">' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') + '</td></tr>';
-      });
-      html += '</tbody></table></div>';
+    if (showCard('upcoming')) {
+      html += '<div class="card"><h2>الجلسات القادمة</h2>';
+      if (!upcoming.length) {
+        html += UI.emptyState('لا جلسات قادمة', 'لا توجد جلسات مجدولة في الأيام القادمة.');
+      } else {
+        html += '<div class="table-wrap"><table class="t-compact"><thead><tr><th>الدورة</th><th>التاريخ</th><th>الوقت</th><th class="hide-m">القاعة</th><th class="hide-m">المدرب</th></tr></thead><tbody>';
+        upcoming.forEach(function (s) {
+          var course = Store.get('courses', s.courseId);
+          var period = Store.get('periods', s.periodId);
+          html += '<tr class="clickable" data-session-open="' + UI.escapeHtml(s.id) + '"><td>' +
+            UI.escapeHtml(course ? course.name : '') + '</td><td>' +
+            UI.escapeHtml(UI.fmtDateFull(s.date)) + '</td><td>' +
+            (period ? UI.fmtTimeRange(period.start, period.end) : '') + '</td>' +
+            '<td class="hide-m">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') + '</td>' +
+            '<td class="hide-m">' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+      html += '</div>';
     }
-    html += '</div>';
 
     // تقدم الدورات النشطة
-    html += '<div class="card"><h2>تقدم الدورات النشطة</h2>';
-    if (!activeCourses.length) {
-      html += UI.emptyState('لا دورات نشطة', 'أنشئ دورة جديدة من شاشة الدورات لتبدأ.', App.canWrite() ? 'دورة جديدة' : null, 'dash-new-course');
-    } else {
-      activeCourses.forEach(function (c) {
-        var prog = App.courseProgress(c.id);
-        html += '<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:10px"><span class="track-name" data-course-open="' +
-          UI.escapeHtml(c.id) + '">' + UI.escapeHtml(c.name) + '</span><span class="muted">' +
-          prog.done + ' من ' + prog.total + ' جلسة</span></div>' +
-          '<div class="progress" style="margin-top:6px"><i style="width:' + prog.percent + '%"></i></div></div>';
-      });
+    if (showCard('progress')) {
+      html += '<div class="card"><h2>تقدم الدورات النشطة</h2>';
+      if (!activeCourses.length) {
+        html += UI.emptyState('لا دورات نشطة', 'أنشئ دورة جديدة من شاشة الدورات لتبدأ.', App.canWrite() ? 'دورة جديدة' : null, 'dash-new-course');
+      } else {
+        activeCourses.forEach(function (c) {
+          var prog = App.courseProgress(c.id);
+          html += '<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:10px"><span class="track-name" data-course-open="' +
+            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted">' +
+            prog.done + ' من ' + prog.total + ' جلسة</span></div>' +
+            '<div class="progress" style="margin-top:6px"><i style="width:' + prog.percent + '%"></i></div></div>';
+        });
+      }
+      html += '</div>';
     }
-    html += '</div>';
 
     // متابعة الدورات
-    html += '<div class="card"><h2>متابعة الدورات</h2>';
+    if (showCard('tracker')) {
+      html += '<div class="card"><h2>متابعة الدورات</h2>';
     if (!activeCourses.length) {
       html += '<div class="muted">لا دورات نشطة للمتابعة.</div>';
     } else {
@@ -111,7 +132,7 @@
         var budget = App.budgetFromCache(c.id);
         var spentPct = budget.allocated > 0 ? Math.min(100, Math.round((budget.totalSpent / budget.allocated) * 100)) : 0;
         html += '<div class="track-row"><div class="track-name" data-course-open="' + UI.escapeHtml(c.id) + '">' +
-          UI.escapeHtml(c.name) + '</div>' +
+          UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</div>' +
           '<div class="track-meter"><div class="track-label">الجلسات: ' + prog.done + ' من ' + prog.total + ' · ' + prog.percent + '%</div>' +
           '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>' +
           '<div class="track-meter"><div class="track-label">الميزانية: ' + UI.fmtMoney(budget.totalSpent) + ' من ' + UI.fmtMoney(budget.allocated) + ' · ' + spentPct + '%</div>' +
@@ -119,6 +140,7 @@
       });
     }
     html += '</div>';
+    }
 
     container.innerHTML = html;
 
@@ -126,7 +148,7 @@
     container.querySelectorAll('[data-session-open]').forEach(function (el) {
       el.addEventListener('click', function () {
         var id = el.getAttribute('data-session-open');
-        if (window.SessionScreen) window.SessionScreen.open(id);
+        if (window.SessionScreen) window.SessionScreen.openActionSheet(id);
       });
     });
     container.querySelectorAll('[data-course-open]').forEach(function (el) {
@@ -162,8 +184,9 @@
       });
     }
 
-    // ملخص حضور الأسبوع (تحميل غير متزامن)
-    loadWeekAttendance();
+    // ملخص حضور الأسبوع (تحميل غير متزامن) — يُتخطى إن أُخفيت بطاقة
+    // الملخص وشريط الإحصاءات معاً (لا مكان لعرض النتيجة فيه).
+    if (showCard('weekAttendance') || showCard('stats')) loadWeekAttendance();
 
     function loadWeekAttendance() {
       var bounds = weekBounds();
