@@ -9,7 +9,7 @@
 
   // ---------- المتجر: نسخة محلية من كل المجموعات ----------
   var COLLECTIONS = [
-    'courses', 'sessions', 'trainees', 'trainers', 'directorates',
+    'courses', 'sessions', 'meetings', 'trainees', 'trainers', 'directorates', 'groups', 'levels',
     'halls', 'periods', 'holidays', 'expenses', 'budgetCategories'
   ];
 
@@ -91,17 +91,43 @@
       .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
   }
 
-  function courseProgress(courseId) {
-    var course = Store.get('courses', courseId);
+  // حالة الإنجاز المشتقة للدورة (إدارة الدورات v1.1): القيم المخزّنة
+  // فعلياً هي active/completed/cancelled فقط (لا قيمة «متوقفة» في
+  // النموذج) — 'paused' هنا دفاعي لتوافق مستقبلي. ملغاة تبقى ملغاة،
+  // والمكتملة المخزّنة تبقى مكتملة، وإلا تُشتق من الجلسات: كل الجلسات
+  // مكتملة (مع وجود جلسة واحدة على الأقل) ← مكتملة، وإلا جارية.
+  // دورة بلا جلسات جارية (0%) ما لم تكن ملغاة أو متوقفة.
+  function completionStatus(course, done, sessionsTotal) {
+    var st = course ? course.status : null;
+    if (st === 'cancelled') return 'cancelled';
+    if (st === 'paused') return 'paused';
+    if (st === 'completed') return 'completed';
+    if (sessionsTotal > 0 && done === sessionsTotal) return 'completed';
+    return 'in-progress';
+  }
+
+  function courseProgress(courseOrId) {
+    var course = (courseOrId && typeof courseOrId === 'object')
+      ? courseOrId : Store.get('courses', courseOrId);
+    var courseId = course ? course.id : courseOrId;
     var sessions = sessionsForCourse(courseId);
     var done = sessions.filter(function (s) { return s.state === 'done'; }).length;
     var total = course ? (Number(course.sessionCount) || sessions.length) : sessions.length;
+    // إنجاز الجلسات الفعلية (أساس أعمدة الإدارة والإحصائيات):
+    // الإجمالي = كل جلسات الدورة الموجودة، لا العدد المخطط.
+    var sessionsTotal = sessions.length;
+    var sessionsRemaining = Math.max(0, sessionsTotal - done);
+    var pct = sessionsTotal > 0 ? Math.round((done / sessionsTotal) * 100) : 0;
     return {
       done: done,
       total: total,
       generated: sessions.length,
       remaining: Math.max(0, total - done),
-      percent: total > 0 ? Math.round((done / total) * 100) : 0
+      percent: total > 0 ? Math.round((done / total) * 100) : 0,
+      sessionsTotal: sessionsTotal,
+      sessionsRemaining: sessionsRemaining,
+      pct: pct,
+      status: completionStatus(course, done, sessionsTotal)
     };
   }
 
@@ -197,6 +223,10 @@
       UI.toast('شاشة الإدارة متاحة للمدير فقط', 'error');
       return;
     }
+    if (name === 'settings' && !Auth().isAdmin()) {
+      UI.toast('إعدادات المنصة متاحة للمدير فقط', 'error');
+      return;
+    }
     renderScreen(name, params || {}, false);
   }
 
@@ -264,6 +294,7 @@
     document.getElementById('topbar-username').textContent = profile.username;
     document.getElementById('topbar-role').textContent = UI.roleLabel(profile.role);
     document.getElementById('nav-admin').hidden = profile.role !== 'admin';
+    document.getElementById('nav-settings').hidden = profile.role !== 'admin';
     showView('app');
     document.getElementById('main-loading').hidden = false;
     document.getElementById('screen-container').innerHTML = '';
@@ -317,15 +348,16 @@
   function attachAuthListener() {
     if (authListenerAttached) return;
     authListenerAttached = true;
-    Auth().onAuthChange(function (user, profile) {
+    Auth().onAuthChange(function (user, profile, reason) {
       if (user && profile) {
         enterApp();
       } else if (user && !profile) {
-        // حساب بلا ملف شخصي: يُمنع الدخول ويُسجَّل الخروج.
+        // حساب بلا ملف شخصي، أو عُطّل/حُذف أثناء جلسة نشطة: يُمنع الدخول ويُسجَّل الخروج.
         Auth().signOut().catch(function () {}).finally(function () {
           entered = false;
           showView('login');
-          document.getElementById('login-error').textContent = 'هذا الحساب غير مفعّل — تواصل مع المدير';
+          document.getElementById('login-error').textContent =
+            reason === 'disabled' ? 'هذا الحساب معطّل — تواصل مع المدير' : 'هذا الحساب غير مفعّل — تواصل مع المدير';
         });
       } else {
         entered = false;
@@ -361,8 +393,9 @@
       var password = document.getElementById('login-password').value;
       var vUser = Auth().validateUsername(username);
       if (!vUser.ok) { errEl.textContent = vUser.error; return; }
-      var vPass = Auth().validatePassword(password);
-      if (!vPass.ok) { errEl.textContent = vPass.error; return; }
+      // كلمة المرور تُفحص بالفراغ فقط عند الدخول — قاعدة القوة
+      // الجديدة لا تُفرَض بأثر رجعي على الحسابات الحالية.
+      if (!password) { errEl.textContent = 'كلمة المرور مطلوبة'; return; }
       var btn = document.getElementById('login-btn');
       UI.setBtnLoading(btn, true, 'جارٍ تسجيل الدخول…');
       Auth().signIn(username, password).then(function () {
@@ -500,7 +533,145 @@
     return d ? d.name : '';
   }
 
+  function groupName(id) {
+    var g = id ? Store.get('groups', id) : null;
+    return g ? g.name : '';
+  }
+
+  // مستويات الدورات الافتراضية (ثوابت برمجية — كحالات الدورات).
+  // حقل level في الدورة يخزّن إما مفتاحاً افتراضياً أو معرّف مستوى
+  // مخصص من مجموعة levels. الدورات القديمة بلا مستوى تُعرض
+  // «بدون مستوى» — لا ترحيل ولا تغيير على البيانات القديمة.
+  var LEVEL_LABELS = {
+    none: 'بدون مستوى',
+    beginner: 'مستوى مبتدئ',
+    intermediate: 'مستوى متوسط',
+    advanced: 'مستوى متقدم'
+  };
+
+  // اسم مستوى الدورة المعروض: مفتاح افتراضي ← تسميته، معرّف مستوى
+  // مخصص ← اسمه من المتجر، وغير ذلك (فارغ أو مجهول أو محذوف) ←
+  // «بدون مستوى». لا يرمي أبداً.
+  function levelName(level) {
+    if (!level) return LEVEL_LABELS.none;
+    if (LEVEL_LABELS[level]) return LEVEL_LABELS[level];
+    var custom = Store.get('levels', level);
+    return custom && custom.name ? custom.name : LEVEL_LABELS.none;
+  }
+
+  // ---------- معرّفات السجلات (v1.1) ----------
+  // رمز بشري مرئي لكل سجل («المعرّف») يُعرض بجانب الاسم وقابل للتعديل.
+  // الحقل `code` اختياري في قاعدة البيانات؛ السجلات القديمة بلا رمز
+  // تُعرض برمز مشتق من ترتيب إنشائها دون كتابة (انظر displayCode)،
+  // ويُثبَّت الرمز المشتق عند أول حفظ لها من نماذج التعديل.
+  var CODE_PREFIXES = {
+    halls: { prefix: 'ق-', digits: 2 },
+    groups: { prefix: 'مج-', digits: 2 },
+    trainees: { prefix: 'م-', digits: 3 },
+    directorates: { prefix: 'د-', digits: 2 },
+    trainers: { prefix: 'مدر-', digits: 2 },
+    courses: { prefix: 'دور-', digits: 2 },
+    periods: { prefix: 'ف-', digits: 2 },
+    budgetCategories: { prefix: 'ب-', digits: 2 }
+  };
+
+  function padNum(n, digits) {
+    var s = String(n);
+    while (s.length < digits) s = '0' + s;
+    return s;
+  }
+
+  // زمن الإنشاء بالميللي ثانية؛ يقبل الطابع الزمني من Firestore والرقم
+  // والنص، ويعيد 0 عند غيابه أو عدم صلاحيته (لا يرمي أبداً).
+  function createdMs(doc) {
+    if (!doc || doc.createdAt == null) return 0;
+    var v = doc.createdAt;
+    if (typeof v === 'number') return v;
+    if (typeof v.toMillis === 'function') { try { return v.toMillis(); } catch (e) { return 0; } }
+    if (typeof v.seconds === 'number') return v.seconds * 1000;
+    if (typeof v === 'string') { var ms = Date.parse(v); return isNaN(ms) ? 0 : ms; }
+    return 0;
+  }
+
+  // سجلات المجموعة مرتبة حسب الإنشاء (ثم المعرّف الداخلي لثبات الترتيب).
+  function sortedForCode(collection) {
+    return Store.getAll(collection).slice().sort(function (a, b) {
+      var d = createdMs(a) - createdMs(b);
+      if (d) return d;
+      return String(a.id || '') < String(b.id || '') ? -1 : String(a.id || '') > String(b.id || '') ? 1 : 0;
+    });
+  }
+
+  // الرمز التالي المتاح للمجموعة: أكبر لاحقة رقمية ظاهرة + 1. يُفحص
+  // الرمز المعروض (المخزَّن أو المشتق) لكل سجل، لا المخزَّن وحده، حتى
+  // لا يصطدم رمز جديد برمز مشتق لسجل قديم بلا رمز مخزَّن.
+  function nextCode(collection) {
+    var cfg = CODE_PREFIXES[collection];
+    if (!cfg) return '';
+    var max = 0;
+    Store.getAll(collection).forEach(function (doc) {
+      var code = displayCode(doc, collection);
+      if (code.indexOf(cfg.prefix) !== 0) return;
+      var rest = code.slice(cfg.prefix.length);
+      if (!/^\d+$/.test(rest)) return;
+      var n = parseInt(rest, 10);
+      if (n > max) max = n;
+    });
+    return cfg.prefix + padNum(max + 1, cfg.digits);
+  }
+
+  // الرمز المعروض لسجل: المخزَّن إن وُجد، وإلا مشتق من ترتيب الإنشاء
+  // دون كتابة. لا يرمي أبداً ولا يعيد سلسلة فارغة لمجموعة معروفة.
+  function displayCode(doc, collection) {
+    var cfg = CODE_PREFIXES[collection];
+    if (!cfg) return (doc && typeof doc.code === 'string') ? doc.code.trim() : '';
+    if (doc && typeof doc.code === 'string' && doc.code.trim()) return doc.code.trim();
+    if (!doc || doc.id == null) return cfg.prefix + padNum(1, cfg.digits);
+    var list = sortedForCode(collection);
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === doc.id) return cfg.prefix + padNum(i + 1, cfg.digits);
+    }
+    return cfg.prefix + padNum(1, cfg.digits);
+  }
+
+  // فرادة الرمز داخل المجموعة (مقابل المتجر المحمَّل)؛ excludeId يستثني
+  // السجل الجاري تعديله حتى لا يُعدَّ رمزه الحالي مكرراً. تُقارَن الرموز
+  // المعروضة (المخزَّنة أو المشتقة) حتى لا يصطدم رمز جديد برمز مشتق
+  // لسجل قديم بلا رمز مخزَّن.
+  function isCodeUnique(collection, code, excludeId) {
+    var c = typeof code === 'string' ? code.trim() : '';
+    if (!c) return false;
+    return !Store.getAll(collection).some(function (doc) {
+      return doc.id !== excludeId && displayCode(doc, collection) === c;
+    });
+  }
+
+  // تسمية الجلسة المشتقة (تُعرض فقط، لا تُخزَّن ولا تُعدَّل):
+  // «رمز الدورة / ج N» حيث N ترتيب الجلسة بين جلسات دورتها حسب التاريخ.
+  function sessionLabel(session, course) {
+    if (!session) return '';
+    var list = session.courseId ? sessionsForCourse(session.courseId) : [];
+    var n = 1;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === session.id) { n = i + 1; break; }
+    }
+    var c = course || (session.courseId ? Store.get('courses', session.courseId) : null);
+    if (!c) return 'ج ' + n;
+    return displayCode(c, 'courses') + ' / ج ' + n;
+  }
+
+  // متدربو الدورة: إن كانت معيّنة لمجموعة لها أعضاء، فأعضاء المجموعة
+  // هم المتدربون (بترتيب المجموعة، مع تجاهل المعرفات بلا سجل)؛ وإلا —
+  // بلا مجموعة، أو مجموعة فارغة، أو مجموعة محذوفة — تُستخدم قائمة
+  // الدورة نفسها كما قبل تماماً. المجموعة الفارغة لا تمسح الحضور أبداً.
   function courseTrainees(course) {
+    if (course && course.groupId) {
+      var group = Store.get('groups', course.groupId);
+      var memberIds = group ? (group.traineeIds || []) : [];
+      if (memberIds.length) {
+        return memberIds.map(function (id) { return Store.get('trainees', id); }).filter(Boolean);
+      }
+    }
     var ids = (course && course.traineeIds) || [];
     return ids.map(function (id) { return Store.get('trainees', id); }).filter(Boolean);
   }
@@ -552,6 +723,53 @@
     });
   }
 
+  // بيانات تقرير الحضور والغياب لعدة جلسات من دورة واحدة (تصدير بنطاق).
+  function buildAttendanceReportData(courseId, sessionIds) {
+    var course = Store.get('courses', courseId);
+    if (!course) return Promise.reject(new Error('الدورة غير موجودة'));
+    var ids = Array.isArray(sessionIds) ? sessionIds : [];
+    var sessions = ids.map(function (id) { return Store.get('sessions', id); }).filter(Boolean)
+      .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    // المجموعة والمديرية المعيّنة (حقول اختيارية جديدة في v1.1؛ الدورات القديمة بلا قيم).
+    var groupDoc = course.groupId ? Store.get('groups', course.groupId) : null;
+    var groupNameVal = (typeof App !== 'undefined' && typeof App.groupName === 'function')
+      ? App.groupName(course.groupId) : (groupDoc ? groupDoc.name : '');
+    var groupDirVal = groupDoc ? directorateName(groupDoc.directorateId) : '';
+    var trainees = courseTrainees(course);
+    var trainer = trainerName(course.trainerId);
+    var outSessions = [];
+    var chain = Promise.resolve();
+    sessions.forEach(function (s) {
+      chain = chain.then(function () {
+        return DB().getSessionAttendance(s.id).then(function (attMap) {
+          outSessions.push({
+            sessionDate: s.date,
+            periodLabel: periodLabel(s.periodId),
+            hallName: hallName(s.hallId),
+            trainerName: trainer,
+            rows: trainees.map(function (t) {
+              var rec = attMap[t.id] || {};
+              return {
+                name: t.name,
+                directorate: directorateName(t.directorateId),
+                status: rec.status ? (UI.ATTENDANCE_LABELS[rec.status] || rec.status) : 'بلا تسجيل',
+                note: rec.note || ''
+              };
+            })
+          });
+        });
+      });
+    });
+    return chain.then(function () {
+      return {
+        courseName: course.name,
+        groupName: groupNameVal,
+        directorate: groupDirVal,
+        sessions: outSessions
+      };
+    });
+  }
+
   // بيانات ملف الدورة الكامل (معلومات + جدول + متدربون + حضور + ميزانية).
   function buildCourseFileData(courseId) {
     var course = Store.get('courses', courseId);
@@ -564,9 +782,19 @@
       var mins = function (t) { var p = String(t).split(':'); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); };
       hours = (Number(course.sessionCount) || 0) * Math.max(0, (mins(period.end) - mins(period.start)) / 60);
     }
+    // المجموعة والمديرية المعيّنة (حقول اختيارية جديدة في v1.1؛ الدورات القديمة بلا قيم).
+    var groupDoc = course.groupId ? Store.get('groups', course.groupId) : null;
+    var groupNameVal = (typeof App !== 'undefined' && typeof App.groupName === 'function')
+      ? App.groupName(course.groupId) : (groupDoc ? groupDoc.name : '');
+    var groupDirVal = groupDoc ? directorateName(groupDoc.directorateId) : '';
+    var groupLabel = groupNameVal ? (groupDirVal ? groupNameVal + ' — ' + groupDirVal : groupNameVal) : '';
     var info = {
       name: course.name,
+      code: displayCode(course, 'courses'),
+      level: levelName(course.level),
       trainer: trainerName(course.trainerId),
+      group: groupLabel,
+      directorate: directorateName(course.directorateId) || '',
       trainerContract: contract ? {
         type: contract.type,
         amount: contract.amount,
@@ -575,6 +803,7 @@
       } : null,
       days: UI.daysLabel(course.days),
       period: period ? period.label + ' (' + period.start + ' - ' + period.end + ')' : '',
+      startDate: course.startDate || (sessions.length ? sessions[0].date : ''),
       sessionCount: course.sessionCount,
       budget: course.budget,
       status: UI.COURSE_STATUS_LABELS[course.status] || course.status,
@@ -653,10 +882,17 @@
     periods.forEach(function (p, pi) {
       days.forEach(function (day, di) {
         var list = Store.getAll('sessions').filter(function (s) {
-          return s.date === day.date && s.periodId === p.id && s.state !== 'cancelled';
+          return s.date === day.date && s.periodId === p.id && s.state !== 'cancelled' && s.state !== 'holiday';
         }).map(function (s) {
           var course = Store.get('courses', s.courseId);
-          return { course: course ? course.name : '', hall: hallName(s.hallId) };
+          return { kind: 'session', course: course ? course.name : '', hall: hallName(s.hallId) };
+        });
+        // الاجتماعات العارضة المجدولة تشغل قاعاتها في الرزنامة أيضاً؛
+        // الملغاة مستثناة (تحرّر القاعة). التصدير يقرأ course/hall فقط.
+        Store.getAll('meetings').filter(function (m) {
+          return m.date === day.date && m.periodId === p.id && m.status !== 'cancelled';
+        }).forEach(function (m) {
+          list.push({ kind: 'meeting', course: 'اجتماع: ' + (m.title || ''), hall: hallName(m.hallId) });
         });
         cells[pi + '|' + di] = list;
       });
@@ -666,6 +902,80 @@
       days: days,
       cells: cells
     };
+  }
+
+  // ---------- بيانات اليوم والنطاق المخصص (v1.1) ----------
+  // يوم واحد بفلاتر: الجلسات تطابق كل فلاتر الدورة/القاعة/المدرب؛
+  // الاجتماعات تطابق فلتر القاعة فقط (بلا دورة أو مدرب)، ففلتر
+  // الدورة أو المدرب يخفيها. شكل مدخلات الاجتماعات يطابق بُناة
+  // الأسبوع/الشهر ({kind:'meeting', course:'اجتماع: …', hall, period}).
+  function buildCalendarDay(dateStr, filters) {
+    var f = filters || {};
+    var periods = Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var orderOf = {};
+    periods.forEach(function (p, i) { orderOf[p.id] = i; });
+    var entries = [];
+    Store.getAll('sessions').filter(function (s) { return s.date === dateStr; }).forEach(function (s) {
+      var course = Store.get('courses', s.courseId);
+      if (f.courseId && s.courseId !== f.courseId) return;
+      if (f.hallId && s.hallId !== f.hallId) return;
+      if (f.trainerId && (!course || course.trainerId !== f.trainerId)) return;
+      entries.push({
+        kind: 'session', id: s.id, courseId: s.courseId,
+        course: course ? course.name : '',
+        trainerId: course ? (course.trainerId || null) : null,
+        trainer: course ? trainerName(course.trainerId) : '',
+        hallId: s.hallId || null, hall: hallName(s.hallId),
+        periodId: s.periodId, period: periodLabel(s.periodId), time: periodTime(s.periodId),
+        state: s.state, stateLabel: UI.SESSION_STATE_LABELS[s.state] || s.state || ''
+      });
+    });
+    // الاجتماعات العارضة المجدولة (الملغاة مستثناة — تحرّر القاعة).
+    (Store.getAll('meetings') || []).filter(function (m) {
+      return m.date === dateStr && m.status !== 'cancelled';
+    }).forEach(function (m) {
+      if (f.courseId || f.trainerId) return;
+      if (f.hallId && m.hallId !== f.hallId) return;
+      entries.push({
+        kind: 'meeting', id: m.id, title: m.title || '',
+        course: 'اجتماع: ' + (m.title || ''),
+        hallId: m.hallId || null, hall: hallName(m.hallId),
+        periodId: m.periodId, period: periodLabel(m.periodId), time: periodTime(m.periodId),
+        date: dateStr, status: m.status || 'scheduled'
+      });
+    });
+    entries.sort(function (a, b) {
+      var oa = orderOf[a.periodId] != null ? orderOf[a.periodId] : 99;
+      var ob = orderOf[b.periodId] != null ? orderOf[b.periodId] : 99;
+      if (oa !== ob) return oa - ob;
+      return String(a.course || '').localeCompare(String(b.course || ''), 'ar');
+    });
+    return { date: dateStr, sessions: entries };
+  }
+
+  function buildDayData(date, filters) {
+    var d = UI.parseDateStr(date) || new Date();
+    var dateStr = UI.dateToStr(d);
+    return {
+      date: dateStr,
+      label: UI.fmtDateFull(dateStr),
+      days: [buildCalendarDay(dateStr, filters)]
+    };
+  }
+
+  function buildRangeData(fromDate, toDate, filters) {
+    var from = UI.parseDateStr(fromDate) || new Date();
+    var to = UI.parseDateStr(toDate) || new Date(from.getTime());
+    if (to < from) { var t = from; from = to; to = t; }
+    // سقف النطاق 93 يوماً حتى لا تُبنى قوائم ضخمة من نطاق مفتوح.
+    var maxTo = new Date(from.getTime());
+    maxTo.setDate(maxTo.getDate() + 92);
+    if (to > maxTo) to = maxTo;
+    var days = [];
+    for (var d = new Date(from.getTime()); d <= to; d.setDate(d.getDate() + 1)) {
+      days.push(buildCalendarDay(UI.dateToStr(d), filters));
+    }
+    return { from: UI.dateToStr(from), to: UI.dateToStr(to), days: days };
   }
 
   function buildMonthData(year, monthIndex) {
@@ -680,8 +990,14 @@
       var sessions = Store.getAll('sessions').filter(function (s) { return s.date === dateStr; })
         .map(function (s) {
           var course = Store.get('courses', s.courseId);
-          return { course: course ? course.name : '', period: periodLabel(s.periodId) };
+          return { kind: 'session', course: course ? course.name : '', period: periodLabel(s.periodId) };
         });
+      // الاجتماعات العارضة المجدولة في هذا اليوم (الملغاة مستثناة).
+      Store.getAll('meetings').filter(function (m) {
+        return m.date === dateStr && m.status !== 'cancelled';
+      }).forEach(function (m) {
+        sessions.push({ kind: 'meeting', course: 'اجتماع: ' + (m.title || ''), period: periodLabel(m.periodId) });
+      });
       currentWeek.push({ dayNumber: d, date: dateStr, sessions: sessions });
       if (currentWeek.length === 7) { weeks.push(currentWeek); currentWeek = []; }
     }
@@ -695,7 +1011,11 @@
   function buildCoursesListData(filter) {
     var courses = Store.getAll('courses');
     if (filter && filter !== 'all') {
-      courses = courses.filter(function (c) { return c.status === filter; });
+      // مرشح حالة الإنجاز المشتقة (كما في قائمة الدورات) — ويُقبل
+      // أيضاً مرشح الحالة المخزّنة مباشرةً لتوافق أي مستدعٍ قديم.
+      courses = courses.filter(function (c) {
+        return courseProgress(c).status === filter || c.status === filter;
+      });
     }
     return courses.map(function (c) {
       var prog = courseProgress(c.id);
@@ -708,8 +1028,107 @@
         sessions: c.sessionCount,
         done: prog.done,
         status: UI.COURSE_STATUS_LABELS[c.status] || c.status,
-        trainees: (c.traineeIds || []).length
+        trainees: courseTrainees(c).length
       };
+    });
+  }
+
+  // ---------- إحصائيات الدورات (إدارة الدورات v1.1) ----------
+  // صف إحصائي لدورة واحدة: حضورها يُقرأ جلسةً بعد جلسة بالتسلسل
+  // (كما في buildCourseFileData). تُرجع {row, present, recorded}.
+  // ملاحظة تسمية: الصف يحمل «المتبقية» مرتين بمعنيين مختلفين —
+  // remaining = الجلسات المتبقية، budgetRemaining = المتبقي من الميزانية.
+  function courseStatsRow(course) {
+    var prog = courseProgress(course);
+    var sessions = sessionsForCourse(course.id);
+    var budget = budgetFromCache(course.id);
+    var startDate = course.startDate || (sessions.length ? sessions[0].date : '');
+    var counts = { present: 0, recorded: 0 };
+    var chain = Promise.resolve();
+    sessions.forEach(function (s) {
+      chain = chain.then(function () {
+        return DB().getSessionAttendance(s.id).then(function (attMap) {
+          Object.keys(attMap).forEach(function (tid) {
+            var st = attMap[tid].status;
+            if (st === 'present' || st === 'absent' || st === 'excused') {
+              counts.recorded++;
+              if (st === 'present') counts.present++;
+            }
+          });
+        }).catch(function () {});
+      });
+    });
+    return chain.then(function () {
+      var rate = counts.recorded ? Math.round((counts.present / counts.recorded) * 100) : 0;
+      return {
+        row: {
+          name: course.name || '',
+          code: displayCode(course, 'courses'),
+          level: levelName(course.level),
+          group: groupName(course.groupId) || '',
+          trainer: trainerName(course.trainerId) || '',
+          directorate: directorateName(course.directorateId) || '',
+          startDate: startDate,
+          total: prog.sessionsTotal,
+          done: prog.done,
+          remaining: prog.sessionsRemaining,
+          pct: prog.pct,
+          trainees: courseTrainees(course).length,
+          attendanceRate: rate,
+          budget: Number(course.budget) || 0,
+          spent: budget.totalSpent,
+          budgetRemaining: budget.remaining
+        },
+        present: counts.present,
+        recorded: counts.recorded
+      };
+    });
+  }
+
+  // بيانات إحصائيات كل الدورات + ملخص عام — تُرجع Promise
+  // (قراءات الحضور غير متزامنة). الشكل:
+  // {courses: [...صفوف], summary: {courses, completed, inProgress,
+  // cancelled, paused, sessionsTotal, sessionsDone, overallPct,
+  // traineesTotal, overallAttendanceRate, budgetTotal, spentTotal,
+  // remainingTotal}}
+  function buildCoursesStatsData() {
+    var courses = Store.getAll('courses').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    });
+    var rows = [];
+    var summary = {
+      courses: courses.length, completed: 0, inProgress: 0, cancelled: 0, paused: 0,
+      sessionsTotal: 0, sessionsDone: 0, overallPct: 0, traineesTotal: 0,
+      overallAttendanceRate: 0, budgetTotal: 0, spentTotal: 0, remainingTotal: 0
+    };
+    var presentTotal = 0, recordedTotal = 0;
+    var chain = Promise.resolve();
+    courses.forEach(function (c) {
+      chain = chain.then(function () {
+        return courseStatsRow(c).then(function (res) {
+          rows.push(res.row);
+          presentTotal += res.present;
+          recordedTotal += res.recorded;
+          var st = courseProgress(c).status;
+          if (st === 'completed') summary.completed++;
+          else if (st === 'cancelled') summary.cancelled++;
+          else if (st === 'paused') summary.paused++;
+          else summary.inProgress++;
+          summary.sessionsTotal += res.row.total;
+          summary.sessionsDone += res.row.done;
+          summary.traineesTotal += res.row.trainees;
+          summary.budgetTotal += res.row.budget;
+          summary.spentTotal += res.row.spent;
+          summary.remainingTotal += res.row.budgetRemaining;
+        });
+      });
+    });
+    return chain.then(function () {
+      summary.overallPct = summary.sessionsTotal
+        ? Math.round((summary.sessionsDone / summary.sessionsTotal) * 100) : 0;
+      summary.overallAttendanceRate = recordedTotal
+        ? Math.round((presentTotal / recordedTotal) * 100) : 0;
+      return { courses: rows, summary: summary };
     });
   }
 
@@ -723,6 +1142,14 @@
       }),
       directorates: Store.getAll('directorates').map(function (d) {
         return { name: d.name, note: d.notes || '' };
+      }),
+      groups: Store.getAll('groups').map(function (g) {
+        return {
+          name: g.name,
+          directorate: directorateName(g.directorateId),
+          courses: Store.getAll('courses').filter(function (c) { return c.groupId === g.id; }).length,
+          note: g.notes || ''
+        };
       }),
       trainees: Store.getAll('trainees').map(function (t) {
         return {
@@ -863,8 +1290,9 @@
       };
     });
     var trainees = Store.getAll('trainees').map(function (t) {
+      // يبحث في القائمة الفعلية (أعضاء المجموعة إن وُجدت — انظر courseTrainees).
       var course = Store.getAll('courses').filter(function (c) {
-        return (c.traineeIds || []).indexOf(t.id) !== -1;
+        return courseTrainees(c).some(function (x) { return x.id === t.id; });
       })[0];
       return {
         name: t.name,
@@ -880,6 +1308,14 @@
     });
     var directorates = Store.getAll('directorates').map(function (d) {
       return { name: d.name, note: '' };
+    });
+    var groups = Store.getAll('groups').map(function (g) {
+      return {
+        name: g.name,
+        directorate: directorateName(g.directorateId),
+        courses: Store.getAll('courses').filter(function (c) { return c.groupId === g.id; }).length,
+        note: g.notes || ''
+      };
     });
     var halls = Store.getAll('halls').map(function (h) {
       return { name: h.name, capacity: h.capacity, location: '', note: '' };
@@ -923,6 +1359,7 @@
         trainees: trainees,
         trainers: trainers,
         directorates: directorates,
+        groups: groups,
         halls: halls,
         periods: periods,
         holidays: holidays,
@@ -968,19 +1405,32 @@
     periodLabel: periodLabel,
     periodTime: periodTime,
     directorateName: directorateName,
+    groupName: groupName,
+    LEVEL_LABELS: LEVEL_LABELS,
+    levelName: levelName,
+    CODE_PREFIXES: CODE_PREFIXES,
+    nextCode: nextCode,
+    displayCode: displayCode,
+    isCodeUnique: isCodeUnique,
+    sessionLabel: sessionLabel,
     courseTrainees: courseTrainees,
     weekDays: weekDays,
     buildTodayData: buildTodayData,
     buildAttendanceData: buildAttendanceData,
+    buildAttendanceReportData: buildAttendanceReportData,
     buildCourseFileData: buildCourseFileData,
     buildWeekData: buildWeekData,
     buildMonthData: buildMonthData,
+    buildDayData: buildDayData,
+    buildRangeData: buildRangeData,
     buildCoursesListData: buildCoursesListData,
+    buildCoursesStatsData: buildCoursesStatsData,
     buildDirectoryData: buildDirectoryData,
     buildBudgetData: buildBudgetData,
     buildSummaryData: buildSummaryData,
     buildBackupData: buildBackupData,
     lock: showLock,
+    applyDisplaySettings: applyDisplaySettings,
     logout: function () {
       Auth().signOut().then(function () { exitApp(); }).catch(function (err) { UI.toastError(err); });
     },
@@ -989,8 +1439,22 @@
     getProfile: function () { return Auth().getCurrentProfile(); }
   };
 
+  // تطبيق إعدادات العرض المحلية: كثافة الجداول المدمجة صنف على body.
+  // تُستدعى عند الإقلاع وعند تغيير الإعداد من شاشة الإعدادات؛ لا تكسر
+  // الإقلاع أبداً (كل قراءة محمية).
+  function applyDisplaySettings() {
+    try {
+      var density = 'comfortable';
+      if (window.UI && typeof UI.getSetting === 'function') {
+        density = UI.getSetting('tableDensity', 'comfortable');
+      }
+      if (document.body) document.body.classList.toggle('density-compact', density === 'compact');
+    } catch (e) { /* إعدادات العرض اختيارية تماماً */ }
+  }
+
   function init() {
     bindForms();
+    applyDisplaySettings();
     boot();
   }
 
