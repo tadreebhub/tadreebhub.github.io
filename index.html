@@ -99,6 +99,7 @@
 <div id="app" hidden>
   <header class="topbar">
     <div class="wordmark">تدريب</div>
+    <div class="topbar-datetime" id="topbar-datetime"><span id="topbar-date"></span><span id="topbar-clock"></span></div>
     <div class="user">
       <span class="uname" id="topbar-username"></span>
       <span class="role-pill" id="topbar-role"></span>
@@ -108,14 +109,25 @@
   </header>
   <div class="layout">
     <aside class="sidebar">
-      <div class="side-label">القائمة الرئيسية</div>
       <nav id="main-nav">
-        <button class="nav-link" type="button" data-screen="dashboard">لوحة المعلومات</button>
-        <button class="nav-link" type="button" data-screen="courses">الدورات</button>
-        <button class="nav-link" type="button" data-screen="calendar">رزنامة القاعات</button>
-        <button class="nav-link" type="button" data-screen="directory">الدليل</button>
-        <button class="nav-link" type="button" data-screen="admin" id="nav-admin" hidden>الإدارة</button>
-        <button class="nav-link" type="button" data-screen="settings" id="nav-settings" hidden>الإعدادات</button>
+        <div class="nav-group">
+          <div class="nav-group-label">الرئيسية</div>
+          <button class="nav-link" type="button" data-screen="dashboard">لوحة المعلومات</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">الدورات والجلسات</div>
+          <button class="nav-link" type="button" data-screen="courses">الدورات</button>
+          <button class="nav-link" type="button" data-screen="calendar">رزنامة القاعات</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">الدليل</div>
+          <button class="nav-link" type="button" data-screen="directory">الدليل</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">الإدارة</div>
+          <button class="nav-link" type="button" data-screen="admin" id="nav-admin" hidden>الإدارة</button>
+          <button class="nav-link" type="button" data-screen="settings" id="nav-settings" hidden>الإعدادات</button>
+        </div>
       </nav>
     </aside>
     <main class="main" id="main-container">
@@ -153,6 +165,7 @@
 <script src="vendor/firebase-firestore-compat.js"></script>
 <script src="js/config.js"></script>
 <script src="js/firebase-init.js"></script>
+<script src="js/datetime.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/db.js"></script>
 <script src="js/notes.js"></script>
