@@ -249,7 +249,7 @@
       title: 'تفاصيل الجلسة',
       width: 'xwide',
       bodyHTML:
-        '<div class="meta-grid" style="grid-template-columns:repeat(3,1fr)">' +
+        '<div class="meta-grid">' +
         '<div class="meta-box"><div class="k">الجلسة</div><div class="v">' + UI.escapeHtml(App.sessionLabel(session, course)) + '</div></div>' +
         '<div class="meta-box"><div class="k">الدورة</div><div class="v">' + UI.escapeHtml(course ? course.name : '') + '</div></div>' +
         '<div class="meta-box"><div class="k">التاريخ</div><div class="v">' + UI.escapeHtml(UI.fmtDateFull(session.date)) + '</div></div>' +
