@@ -21,6 +21,49 @@
   var NUM_FMT = '#,##0';
   var MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+  /* ---------- تفضيلات تنسيق التصدير ---------- */
+  // تُقرأ من opts.fmt عند تمريرها، وإلا من UI.getSetting('exportFmt') في
+  // المتصفح، وإلا الافتراضي (السلوك الحالي تماماً). كل قراءة لـ window.UI
+  // محمية — المحرك يعمل مستقلاً في اختبار Node بلا UI.
+  // في المتصفح تُقرأ التفضيلات حيةً في كل استدعاء (fmtNow) فتبقى طازجة
+  // لكل الصادرات؛ activeFmt يخدم مسار opts.fmt خارج المتصفح فقط.
+  var DEFAULT_EXPORT_FMT = { dateFormat: 'iso', numbers: 'western', thousands: true, title: true };
+  var activeFmt = DEFAULT_EXPORT_FMT;
+  var LEVANT_MONTHS = [
+    'كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران',
+    'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'
+  ];
+  var EASTERN_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+
+  function normalizeFmt(fmt) {
+    fmt = fmt || {};
+    return {
+      dateFormat: (fmt.dateFormat === 'dmy' || fmt.dateFormat === 'long') ? fmt.dateFormat : 'iso',
+      numbers: fmt.numbers === 'eastern' ? 'eastern' : 'western',
+      thousands: fmt.thousands !== false,
+      title: fmt.title !== false
+    };
+  }
+
+  function resolveFmt(opts) {
+    if (opts && opts.fmt && typeof opts.fmt === 'object') return normalizeFmt(opts.fmt);
+    try {
+      if (typeof window !== 'undefined' && window.UI && typeof window.UI.getSetting === 'function') {
+        return normalizeFmt(window.UI.getSetting('exportFmt', DEFAULT_EXPORT_FMT));
+      }
+    } catch (e) { /* بلا UI — الافتراضي */ }
+    return normalizeFmt(null);
+  }
+
+  function fmtNow() {
+    try {
+      if (typeof window !== 'undefined' && window.UI && typeof window.UI.getSetting === 'function') {
+        return normalizeFmt(window.UI.getSetting('exportFmt', DEFAULT_EXPORT_FMT));
+      }
+    } catch (e) { /* بلا UI — تفضيلات الاستدعاء الحالي */ }
+    return activeFmt;
+  }
+
   /* ---------- أدوات داخلية ---------- */
 
   // تحويل نص إلى مقطع آمن لاسم الملف (ASCII فقط)
@@ -59,8 +102,9 @@
     return todayString() + ' ' + hh + ':' + mm;
   }
 
-  // تطبيع تاريخ إلى نص YYYY-MM-DD (نص صريح لتفادي أرقام إكسل التسلسلية)
-  function asDateText(v) {
+  // تاريخ ISO خام دائماً — لأسماء الملفات والفرز (يجب أن يبقى
+  // YYYY-MM-DD بلا شرطات مائلة أو حروف عربية مهما كان تفضيل العرض).
+  function isoDateText(v) {
     if (v == null || v === '') return '';
     if (v instanceof Date) {
       var m = String(v.getMonth() + 1).padStart(2, '0');
@@ -72,7 +116,22 @@
     return s;
   }
 
-  // تطبيع طابع زمني إلى نص YYYY-MM-DD HH:MM
+  // تطبيع تاريخ إلى نص حسب تفضيل تنسيق التاريخ:
+  // iso ← YYYY-MM-DD (الافتراضي، كما قبل)، dmy ← DD/MM/YYYY،
+  // long ← «17 تشرين الثاني 2026» (أسماء شامية كما في UI.fmtDate).
+  function asDateText(v) {
+    var iso = isoDateText(v);
+    var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!parts) return iso;
+    var fmt = fmtNow();
+    if (fmt.dateFormat === 'dmy') return parts[3] + '/' + parts[2] + '/' + parts[1];
+    if (fmt.dateFormat === 'long') {
+      return parseInt(parts[3], 10) + ' ' + LEVANT_MONTHS[parseInt(parts[2], 10) - 1] + ' ' + parts[1];
+    }
+    return iso;
+  }
+
+  // تطبيع طابع زمني إلى نص (التاريخ حسب التفضيل + الوقت HH:MM)
   function asDateTimeText(v) {
     if (v == null || v === '') return '';
     if (v instanceof Date) {
@@ -81,8 +140,8 @@
     }
     var s = String(v).trim();
     var m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
-    if (m) return m[1] + ' ' + m[2];
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (m) return asDateText(m[1]) + ' ' + m[2];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return asDateText(s);
     return s;
   }
 
@@ -97,9 +156,24 @@
     return v == null ? '' : String(v);
   }
 
-  // رقم بفواصل الآلاف لتضمينه داخل نص
+  // رقم منسّق لتضمينه داخل نص — حسب تفضيلات التصدير (فاصل الآلاف
+  // والأرقام المشرقية). الخلايا الرقمية في إكسل تبقى أرقاماً حقيقية
+  // (لتبقى قابلة للجمع والفرز)؛ فاصل الآلاف فيها عبر numFmt في
+  // writeDataRow، والأرقام المشرقية لا تنطبق عليها لأن إكسل يعرض
+  // الأرقام حسب لغة العارض لا حسب النص المخزّن.
+  function fmtExportNum(n) {
+    var fmt = fmtNow();
+    var v = asNumber(n);
+    var s = fmt.thousands ? v.toLocaleString('en-US') : String(v);
+    if (fmt.numbers === 'eastern') {
+      s = s.replace(/[0-9]/g, function (d) { return EASTERN_DIGITS[+d]; });
+    }
+    return s;
+  }
+
+  // رقم بفواصل الآلاف لتضمينه داخل نص (يستخدم fmtExportNum)
   function fmtNumber(v) {
-    return asNumber(v).toLocaleString('en-US');
+    return fmtExportNum(v);
   }
 
   // المبرر: حقل justification إن وُجد، وإلا الملاحظة عند الاعتذار (توافق مع الشكل القديم)
@@ -134,6 +208,20 @@
     return '';
   }
 
+  // عناوين ورقة المجموعات التدريبية (مشتركة بين الدليل والنسخة الاحتياطية)
+  var GROUP_HEADERS = ['اسم المجموعة', 'المديرية', 'عدد الدورات', 'الملاحظة'];
+
+  // صفوف ورقة المجموعات التدريبية من {name, directorate, courses, note}
+  // عدد الدورات رقم دائماً: رقم مباشر، أو طول المصفوفة إن كانت قائمة دورات
+  function groupRows(groups) {
+    return (Array.isArray(groups) ? groups : []).map(function (g) {
+      g = g || {};
+      var count = Array.isArray(g.courses) ? g.courses.length
+        : (g.courses != null ? asNumber(g.courses) : '');
+      return [asText(g.name), asText(g.directorate), count, asText(g.note)];
+    });
+  }
+
   /* ---------- مساعدات ExcelJS والتنسيق ---------- */
 
   function getExcelJS() {
@@ -162,16 +250,20 @@
   }
 
   // إنشاء ورقة مع كتلة العنوان: الصف 1 عنوان، الصف 2 سطر الإنشاء (+ نطاق)
+  // عند إيقاف «تضمين صف العنوان» يُترك الصف 1 فارغاً ويبقى سطر الإنشاء
+  // وصف العناوين (3) والتجميد كما هي تماماً.
   function createSheet(wb, name, title, subtitle, colCount) {
     var ws = wb.addWorksheet(name);
     var gen = 'تاريخ الإنشاء: ' + nowString();
     if (subtitle) gen += ' — ' + subtitle;
-    if (colCount > 1) ws.mergeCells(1, 1, 1, colCount);
-    var titleCell = ws.getCell(1, 1);
-    titleCell.value = title;
-    titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: NAVY } };
-    titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
-    ws.getRow(1).height = 24;
+    if (fmtNow().title !== false) {
+      if (colCount > 1) ws.mergeCells(1, 1, 1, colCount);
+      var titleCell = ws.getCell(1, 1);
+      titleCell.value = title;
+      titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: NAVY } };
+      titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
+      ws.getRow(1).height = 24;
+    }
     if (colCount > 1) ws.mergeCells(2, 1, 2, colCount);
     var genCell = ws.getCell(2, 1);
     genCell.value = gen;
@@ -196,6 +288,7 @@
   }
 
   // صف بيانات: حدود رفيعة + تنسيق أرقام بفواصل الآلاف للخلايا الرقمية
+  // (أو بلا فواصل عند إيقاف «فاصل الآلاف» — ينطبق على كل الأوراق).
   function writeDataRow(ws, rowNum, values) {
     var row = ws.getRow(rowNum);
     values.forEach(function (v, i) {
@@ -203,7 +296,7 @@
       cell.value = v == null ? '' : v;
       cell.border = thinBorder();
       cell.alignment = { vertical: 'middle', wrapText: true };
-      if (typeof v === 'number') cell.numFmt = NUM_FMT;
+      if (typeof v === 'number') cell.numFmt = fmtNow().thousands ? NUM_FMT : '0';
     });
   }
 
@@ -262,8 +355,11 @@
     setTimeout(function () { URLObj.revokeObjectURL(url); }, 1000);
   }
 
-  // كتابة غير متزامنة (ExcelJS)؛ تُعيد اسم الملف فوراً كما قبل
+  // كتابة غير متزامنة (ExcelJS)؛ تُعيد اسم الملف فوراً كما قبل.
+  // اسم الملف يُنظَّف من أحرف المسارات دائماً (شبكة أمان لأي تنسيق
+  // تاريخ يصل إلى اسم الملف — الافتراضي لا يتغير أبداً).
   function writeWorkbook(wb, filename) {
+    filename = String(filename || '').replace(/[\/\\?%*:|"<>]/g, '-');
     lastWrite = wb.xlsx.writeBuffer().then(function (buffer) {
       if (bufferSink) {
         bufferSink(buffer, filename);
@@ -284,6 +380,7 @@
   /* ---------- 1. تصدير الحضور ---------- */
   function exportAttendance(opts) {
     opts = opts || {};
+    activeFmt = resolveFmt(opts);
     var rows = Array.isArray(opts.rows) ? opts.rows : [];
     var wb = newWorkbook();
 
@@ -329,13 +426,87 @@
 
     finishSheet(ws, headers.length);
     var filename = 'tadreeb-attendance-' + sanitizeFilename(opts.courseName) +
-      '-' + (asDateText(opts.sessionDate) || todayString()) + '.xlsx';
+      '-' + (isoDateText(opts.sessionDate) || todayString()) + '.xlsx';
+    return writeWorkbook(wb, filename);
+  }
+
+  /* ---------- 1-ب. تقرير الحضور والغياب (عدة جلسات) ---------- */
+  function exportAttendanceReport(data) {
+    data = data || {};
+    activeFmt = resolveFmt(data);
+    var sessions = Array.isArray(data.sessions) ? data.sessions.slice() : [];
+    sessions.sort(function (a, b) {
+      var da = isoDateText((a || {}).sessionDate), db = isoDateText((b || {}).sessionDate);
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+    var wb = newWorkbook();
+
+    var scope = 'الدورة: ' + asText(data.courseName);
+    if (data.groupName) scope += ' — المجموعة: ' + asText(data.groupName);
+
+    var headers = ['التاريخ', 'الفترة', 'الاسم', 'المديرية', 'الحالة', 'المبرر', 'الملاحظة'];
+    var ws = createSheet(wb, 'الحضور والغياب', 'سجل الحضور والغياب', scope, headers.length);
+    writeHeaderRow(ws, 3, headers);
+
+    var rowNum = 4;
+    var totals = { present: 0, absent: 0, excused: 0, unrecorded: 0 };
+    var perSession = [];
+    sessions.forEach(function (s) {
+      s = s || {};
+      var rows = Array.isArray(s.rows) ? s.rows : [];
+      var counts = { present: 0, absent: 0, excused: 0, unrecorded: 0 };
+      rows.forEach(function (r) {
+        r = r || {};
+        var st = r.status ? asText(r.status) : 'بلا تسجيل';
+        if (st === 'موجود') counts.present++;
+        else if (st === 'غائب') counts.absent++;
+        else if (st === 'معتذر') counts.excused++;
+        else counts.unrecorded++;
+        writeDataRow(ws, rowNum, [
+          asDateText(s.sessionDate),
+          asText(s.periodLabel),
+          asText(r.name),
+          asText(r.directorate),
+          st,
+          justificationOf(r),
+          // الملاحظة: تُعرض هنا فقط إن لم تكن هي المبرر نفسه (عند الاعتذار)
+          st === 'معتذر' ? '' : asText(r.note)
+        ]);
+        rowNum++;
+      });
+      perSession.push({ date: asDateText(s.sessionDate), counts: counts });
+      totals.present += counts.present;
+      totals.absent += counts.absent;
+      totals.excused += counts.excused;
+      totals.unrecorded += counts.unrecorded;
+    });
+
+    // كتلة الملخص أسفل الجدول: عدد كل جلسة ثم الإجمالي الكلي
+    var next = rowNum + 1;
+    writeHeaderRow(ws, next, ['الملخص', 'موجود', 'غائب', 'معتذر', 'بلا تسجيل', 'الإجمالي']);
+    perSession.forEach(function (ps, i) {
+      var c = ps.counts;
+      writeDataRow(ws, next + 1 + i, [
+        'جلسة ' + ps.date,
+        c.present, c.absent, c.excused, c.unrecorded,
+        c.present + c.absent + c.excused + c.unrecorded
+      ]);
+    });
+    var grand = totals.present + totals.absent + totals.excused + totals.unrecorded;
+    writeDataRow(ws, next + 1 + perSession.length, [
+      'الإجمالي', totals.present, totals.absent, totals.excused, totals.unrecorded, grand
+    ]);
+
+    finishSheet(ws, headers.length);
+    var filename = 'tadreeb-attendance-report-' + sanitizeFilename(data.courseName) +
+      '-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
   }
 
   /* ---------- 2. تصدير أوقات اليوم ---------- */
   function exportToday(opts) {
     opts = opts || {};
+    activeFmt = resolveFmt(opts);
     var sessions = Array.isArray(opts.sessions) ? opts.sessions : [];
     var wb = newWorkbook();
 
@@ -345,7 +516,7 @@
     addTableSheet(wb, 'أوقات اليوم', 'أوقات اليوم',
       'التاريخ: ' + (asDateText(opts.date) || todayString()),
       ['الفترة', 'الوقت', 'الدورة', 'القاعة', 'المدرب'], rows);
-    var filename = 'tadreeb-today-' + (asDateText(opts.date) || todayString()) + '.xlsx';
+    var filename = 'tadreeb-today-' + (isoDateText(opts.date) || todayString()) + '.xlsx';
     return writeWorkbook(wb, filename);
   }
 
@@ -356,10 +527,15 @@
     var directorates = Array.isArray(info.directorates) ? info.directorates.join('، ') : asText(info.directorates);
     var rows = [
       ['اسم الدورة', asText(info.name)],
+      ['المعرّف', asText(info.code)],
+      ['المستوى', asText(info.level)],
       ['المدرب', asText(info.trainer)],
+      ['المجموعة', asText(info.group)],
+      ['المديرية المعيّنة', asText(info.directorate)],
       ['عقد المدرب', trainerFeeText(info.trainerContract)],
       ['الأيام', asText(info.days)],
       ['الفترة التدريبية', asText(info.period)],
+      ['تاريخ بدء الدورة', asDateText(info.startDate)],
       ['عدد الجلسات', info.sessionCount != null ? asNumber(info.sessionCount) : ''],
       ['الميزانية (ل.س)', info.budget != null ? asNumber(info.budget) : ''],
       ['الحالة', asText(info.status)],
@@ -469,6 +645,7 @@
 
   function exportCourseFile(data, options) {
     data = data || {};
+    activeFmt = resolveFmt(data);
     options = options || {};
     var sections = options.sections || {};
     var wb = buildCourseWorkbook(data, sections);
@@ -499,6 +676,7 @@
 
   function exportWeekCalendar(opts) {
     opts = opts || {};
+    activeFmt = resolveFmt(opts);
     var periods = Array.isArray(opts.periods) ? opts.periods : [];
     var days = Array.isArray(opts.days) ? opts.days : [];
     var cells = opts.cells || {};
@@ -517,7 +695,7 @@
     });
     finishSheet(ws, header.length);
 
-    var startDate = (days[0] && days[0].date) ? asDateText(days[0].date) : todayString();
+    var startDate = (days[0] && days[0].date) ? isoDateText(days[0].date) : todayString();
     var filename = 'tadreeb-week-' + startDate + '.xlsx';
     return writeWorkbook(wb, filename);
   }
@@ -525,6 +703,7 @@
   /* ---------- 5. كالندر الشهر ---------- */
   function exportMonthCalendar(opts) {
     opts = opts || {};
+    activeFmt = resolveFmt(opts);
     var weeks = Array.isArray(opts.weeks) ? opts.weeks : [];
     var wb = newWorkbook();
 
@@ -558,7 +737,7 @@
     for (var w = 0; w < weeks.length; w++) {
       for (var d = 0; d < 7; d++) {
         var c = weeks[w] && weeks[w][d];
-        if (c && c.date) { yyyymm = asDateText(c.date).slice(0, 7); break outer; }
+        if (c && c.date) { yyyymm = isoDateText(c.date).slice(0, 7); break outer; }
       }
     }
     if (!yyyymm) yyyymm = todayString().slice(0, 7);
@@ -566,9 +745,76 @@
     return writeWorkbook(wb, filename);
   }
 
+  /* ---------- 5أ. جدول اليوم ---------- */
+  function exportDaySchedule(opts) {
+    opts = opts || {};
+    activeFmt = resolveFmt(opts);
+    var days = Array.isArray(opts.days) ? opts.days : [];
+    var date = asDateText(opts.date) || (days[0] ? asDateText(days[0].date) : todayString());
+    var dateIso = isoDateText(opts.date) || (days[0] ? isoDateText(days[0].date) : todayString());
+    var wb = newWorkbook();
+
+    var headers = ['الفترة', 'الدورة', 'المدرب', 'القاعة', 'الحالة'];
+    var ws = createSheet(wb, 'جدول اليوم', 'جدول يوم ' + date, asText(opts.label), headers.length);
+    writeHeaderRow(ws, 3, headers);
+    var row = 4;
+    days.forEach(function (day) {
+      var entries = Array.isArray(day.sessions) ? day.sessions : [];
+      entries.forEach(function (e) {
+        var period = asText(e.period) + (e.time ? ' (' + asText(e.time) + ')' : '');
+        if (e.kind === 'meeting') {
+          writeDataRow(ws, row++, [period, 'اجتماع: ' + asText(e.title || e.course), '', asText(e.hall), 'مجدول']);
+        } else {
+          writeDataRow(ws, row++, [period, asText(e.course), asText(e.trainer),
+            asText(e.hall) || 'بلا قاعة', asText(e.stateLabel || e.state)]);
+        }
+      });
+    });
+    finishSheet(ws, headers.length);
+
+    var filename = 'tadreeb-day-schedule-' + dateIso + '.xlsx';
+    return writeWorkbook(wb, filename);
+  }
+
+  /* ---------- 5ب. جدول النطاق المخصص ---------- */
+  function exportRangeSchedule(opts) {
+    opts = opts || {};
+    activeFmt = resolveFmt(opts);
+    var days = (Array.isArray(opts.days) ? opts.days : []).slice().sort(function (a, b) {
+      return (a.date || '') < (b.date || '') ? -1 : (a.date || '') > (b.date || '') ? 1 : 0;
+    });
+    var from = asDateText(opts.from) || (days[0] ? asDateText(days[0].date) : todayString());
+    var to = asDateText(opts.to) || (days.length ? asDateText(days[days.length - 1].date) : from);
+    var fromIso = isoDateText(opts.from) || (days[0] ? isoDateText(days[0].date) : todayString());
+    var toIso = isoDateText(opts.to) || (days.length ? isoDateText(days[days.length - 1].date) : fromIso);
+    var wb = newWorkbook();
+
+    var headers = ['التاريخ', 'الفترة', 'الدورة', 'المدرب', 'القاعة', 'الحالة'];
+    var ws = createSheet(wb, 'جدول النطاق', 'جدول النطاق ' + from + ' — ' + to, '', headers.length);
+    writeHeaderRow(ws, 3, headers);
+    var row = 4;
+    days.forEach(function (day) {
+      var entries = Array.isArray(day.sessions) ? day.sessions : [];
+      entries.forEach(function (e) {
+        var period = asText(e.period) + (e.time ? ' (' + asText(e.time) + ')' : '');
+        if (e.kind === 'meeting') {
+          writeDataRow(ws, row++, [asDateText(day.date), period, 'اجتماع: ' + asText(e.title || e.course), '', asText(e.hall), 'مجدول']);
+        } else {
+          writeDataRow(ws, row++, [asDateText(day.date), period, asText(e.course), asText(e.trainer),
+            asText(e.hall) || 'بلا قاعة', asText(e.stateLabel || e.state)]);
+        }
+      });
+    });
+    finishSheet(ws, headers.length);
+
+    var filename = 'tadreeb-range-schedule-' + fromIso + '-to-' + toIso + '.xlsx';
+    return writeWorkbook(wb, filename);
+  }
+
   /* ---------- 6. قائمة الدورات ---------- */
   function exportCoursesList(rows) {
     rows = Array.isArray(rows) ? rows : [];
+    activeFmt = resolveFmt(null);
     var wb = newWorkbook();
 
     var dataRows = rows.map(function (r) {
@@ -602,9 +848,71 @@
     return writeWorkbook(wb, filename);
   }
 
+  /* ---------- إحصائيات الدورات (إدارة الدورات v1.1) ---------- */
+  // data: {courses: [{name, code, level, group, trainer, directorate, startDate,
+  // total, done, remaining, pct, trainees, attendanceRate, budget, spent,
+  // budgetRemaining}], summary: {...}} — كما يبنيه App.buildCoursesStatsData.
+  // النسب أرقام عادية مع «%» في الترويسة (كما في قائمة الدورات).
+  function exportCoursesStats(data) {
+    data = data || {};
+    var courses = Array.isArray(data.courses) ? data.courses : [];
+    var summary = data.summary || {};
+    var wb = newWorkbook();
+
+    addTableSheet(wb, 'إحصائيات الدورات', 'إحصائيات الدورات', '',
+      ['الدورة', 'المعرّف', 'المستوى', 'المجموعة', 'المدرب', 'المديرية', 'تاريخ البدء',
+       'إجمالي الجلسات', 'المكتملة', 'المتبقية', 'نسبة الإنجاز %', 'عدد المتدربين',
+       'نسبة الحضور %', 'الميزانية المعتمدة', 'المصروف', 'المتبقي'],
+      courses.map(function (c) {
+        c = c || {};
+        var budget = c.budget != null ? asNumber(c.budget) : null;
+        var spent = c.spent != null ? asNumber(c.spent) : null;
+        var budgetRemaining = c.budgetRemaining != null ? asNumber(c.budgetRemaining)
+          : ((budget != null && spent != null) ? budget - spent : '');
+        return [
+          asText(c.name),
+          asText(c.code),
+          asText(c.level),
+          asText(c.group),
+          asText(c.trainer),
+          asText(c.directorate),
+          asDateText(c.startDate),
+          c.total != null ? asNumber(c.total) : '',
+          c.done != null ? asNumber(c.done) : '',
+          c.remaining != null ? asNumber(c.remaining) : '',
+          c.pct != null ? asNumber(c.pct) : '',
+          c.trainees != null ? asNumber(c.trainees) : '',
+          c.attendanceRate != null ? asNumber(c.attendanceRate) : '',
+          budget != null ? budget : '',
+          spent != null ? spent : '',
+          budgetRemaining
+        ];
+      }));
+
+    addTableSheet(wb, 'ملخص عام', 'ملخص عام', '', ['البند', 'القيمة'], [
+      ['عدد الدورات', summary.courses != null ? asNumber(summary.courses) : ''],
+      ['مكتملة', summary.completed != null ? asNumber(summary.completed) : ''],
+      ['جارية', summary.inProgress != null ? asNumber(summary.inProgress) : ''],
+      ['ملغاة', summary.cancelled != null ? asNumber(summary.cancelled) : ''],
+      ['متوقفة', summary.paused != null ? asNumber(summary.paused) : ''],
+      ['إجمالي الجلسات', summary.sessionsTotal != null ? asNumber(summary.sessionsTotal) : ''],
+      ['الجلسات المكتملة', summary.sessionsDone != null ? asNumber(summary.sessionsDone) : ''],
+      ['نسبة الإنجاز الإجمالية %', summary.overallPct != null ? asNumber(summary.overallPct) : ''],
+      ['إجمالي المتدربين', summary.traineesTotal != null ? asNumber(summary.traineesTotal) : ''],
+      ['نسبة الحضور الإجمالية %', summary.overallAttendanceRate != null ? asNumber(summary.overallAttendanceRate) : ''],
+      ['إجمالي الميزانيات', summary.budgetTotal != null ? asNumber(summary.budgetTotal) : ''],
+      ['إجمالي المصروف', summary.spentTotal != null ? asNumber(summary.spentTotal) : ''],
+      ['إجمالي المتبقي', summary.remainingTotal != null ? asNumber(summary.remainingTotal) : '']
+    ]);
+
+    var filename = 'tadreeb-courses-stats-' + todayString() + '.xlsx';
+    return writeWorkbook(wb, filename);
+  }
+
   /* ---------- 7. الدليل ---------- */
   function exportDirectory(opts) {
     opts = opts || {};
+    activeFmt = resolveFmt(opts);
     var wb = newWorkbook();
     var added = 0;
 
@@ -636,6 +944,12 @@
       added++;
     }
 
+    var groups = Array.isArray(opts.groups) ? opts.groups : [];
+    if (groups.length) {
+      addTableSheet(wb, 'المجموعات التدريبية', 'المجموعات التدريبية', '', GROUP_HEADERS, groupRows(groups));
+      added++;
+    }
+
     var trainees = Array.isArray(opts.trainees) ? opts.trainees : [];
     if (trainees.length) {
       addTableSheet(wb, 'المتدربون', 'المتدربون', '',
@@ -659,6 +973,7 @@
   /* ---------- 8. الميزانية ---------- */
   function exportBudget(opts) {
     opts = opts || {};
+    activeFmt = resolveFmt(opts);
     var wb = newWorkbook();
     addBudgetSheet(wb, 'ملخص الميزانية', 'ملخص الميزانية', asText(opts.courseName),
       opts, opts.trainerContract, null);
@@ -675,6 +990,7 @@
   /* ---------- 9. التقرير الختامي ---------- */
   function exportClosingReport(courseFileData) {
     courseFileData = courseFileData || {};
+    activeFmt = resolveFmt(courseFileData);
     var wb = buildCourseWorkbook(courseFileData, {});
     var info = courseFileData.info || {};
     var budget = courseFileData.budget || {};
@@ -732,6 +1048,7 @@
   /* ---------- 10. التقرير الملخّص ---------- */
   function exportSummary(data) {
     data = data || {};
+    activeFmt = resolveFmt(data);
     var totals = data.totals || {};
     var wb = newWorkbook();
 
@@ -794,6 +1111,7 @@
   /* ---------- 11. النسخة الاحتياطية الكاملة ---------- */
   function exportBackup(data) {
     data = data || {};
+    activeFmt = resolveFmt(data);
     var wb = newWorkbook();
     var added = 0;
 
@@ -850,6 +1168,9 @@
         if (typeof d === 'string') return [d, ''];
         return [asText(d.name), asText(d.note)];
       }));
+
+    var groups = Array.isArray(data.groups) ? data.groups : [];
+    maybeAdd('المجموعات التدريبية', 'المجموعات التدريبية', GROUP_HEADERS, groupRows(groups));
 
     var halls = Array.isArray(data.halls) ? data.halls : [];
     maybeAdd('القاعات', 'القاعات',
@@ -1103,11 +1424,15 @@
   function quickExport(kind, data) {
     switch (kind) {
       case 'attendance': return exportAttendance(data);
+      case 'attendance-report': return exportAttendanceReport(data);
       case 'today': return exportToday(data);
       case 'course': return exportCourseFile(data);
       case 'week': return exportWeekCalendar(data);
       case 'month': return exportMonthCalendar(data);
+      case 'day-schedule': return exportDaySchedule(data);
+      case 'range-schedule': return exportRangeSchedule(data);
       case 'courses': return exportCoursesList(data);
+      case 'courses-stats': return exportCoursesStats(data);
       case 'directory': return exportDirectory(data);
       case 'budget': return exportBudget(data);
       case 'closing': return exportClosingReport(data);
@@ -1120,11 +1445,15 @@
   /* ---------- الواجهة العامة ---------- */
   var api = {
     exportAttendance: exportAttendance,
+    exportAttendanceReport: exportAttendanceReport,
     exportToday: exportToday,
     exportCourseFile: exportCourseFile,
     exportWeekCalendar: exportWeekCalendar,
     exportMonthCalendar: exportMonthCalendar,
+    exportDaySchedule: exportDaySchedule,
+    exportRangeSchedule: exportRangeSchedule,
     exportCoursesList: exportCoursesList,
+    exportCoursesStats: exportCoursesStats,
     exportDirectory: exportDirectory,
     exportBudget: exportBudget,
     exportClosingReport: exportClosingReport,
