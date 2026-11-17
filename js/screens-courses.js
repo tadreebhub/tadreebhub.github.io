@@ -5,6 +5,7 @@
 
   var currentFilter = 'all';
   var currentLevelFilter = 'all';
+  var currentSearch = '';
 
   // تسميات حالة الإنجاز المشتقة (مفاتيح App.courseProgress().status).
   var COMPLETION_FILTER_LABELS = { all: 'الكل', completed: 'مكتملة', 'in-progress': 'جارية', cancelled: 'ملغاة', paused: 'متوقفة' };
@@ -37,8 +38,11 @@
       '<div class="muted">جميع الدورات التدريبية الحالية والسابقة</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="courses-export-btn">تصدير إكسل ↓</button>';
     if (canWrite) html += '<button class="btn btn-outline btn-sm" type="button" id="courses-stats-btn">تصدير الإحصائيات ↓</button>' +
+      '<button class="btn btn-outline btn-sm" type="button" id="courses-attendance-stats-btn">إحصاءات الحضور ↓</button>' +
       '<button class="btn" type="button" id="new-course-btn">دورة جديدة</button>';
     html += '</div></div>';
+
+    html += '<div id="courses-stats-panel"></div>';
 
     var chips = [['all', 'الكل'], ['completed', 'مكتملة'], ['in-progress', 'جارية'], ['cancelled', 'ملغاة'], ['paused', 'متوقفة']];
     html += '<div class="toolbar"><div class="chips">';
@@ -48,7 +52,9 @@
     });
     html += '</div><select class="input" id="courses-level-filter" aria-label="فلترة حسب المستوى">' +
       '<option value="all"' + (currentLevelFilter === 'all' ? ' selected' : '') + '>كل المستويات</option>' +
-      levelFilterOptionsHtml() + '</select>';
+      levelFilterOptionsHtml() + '</select>' +
+      '<input type="text" class="input" id="courses-search" placeholder="ابحث بالاسم أو المدرب…" style="flex:1;min-width:200px" value="' +
+      UI.escapeHtml(currentSearch) + '" aria-label="البحث في الدورات">';
     html += '</div>';
 
     html += '<div class="card">';
@@ -57,35 +63,60 @@
         'لم تُنشأ أي دورة بعد.' : 'لا دورات بهذه الحالة.',
         canWrite && currentFilter === 'all' ? 'دورة جديدة' : null, 'courses-empty-new');
     } else {
-      html += '<div class="table-wrap"><table><thead><tr><th>الدورة</th><th>المدرب</th><th>القاعات</th><th>الأيام</th><th>الجلسات</th><th>الإنجاز</th><th>المتبقية</th><th>الحالة</th><th>المستوى</th><th>المتدربون</th><th>إجراءات</th></tr></thead><tbody>';
       courses.forEach(function (c) {
         var prog = App.courseProgress(c);
         var halls = App.hallsUsedByCourse(c.id);
-        html += '<tr class="clickable" data-course-open="' + UI.escapeHtml(c.id) + '">' +
-          '<td><strong>' + UI.escapeHtml(c.name) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(c, 'courses')) + '</span></td>' +
-          '<td>' + UI.escapeHtml(App.trainerName(c.trainerId) || 'بلا مدرب') + '</td>' +
-          '<td>' + UI.escapeHtml(halls.length ? halls.join(' · ') : '—') + '</td>' +
-          '<td>' + UI.escapeHtml(UI.daysLabel(c.days)) + '</td>' +
-          '<td>' + prog.done + '/' + prog.sessionsTotal + '</td>' +
-          '<td><div class="prog-row"><div class="progress"><i style="width:' + prog.pct + '%"></i></div><span class="muted">' + prog.pct + '%</span></div></td>' +
-          '<td>' + prog.sessionsRemaining + '</td>' +
-          '<td>' + completionPill(prog.status) + '</td>' +
-          '<td>' + UI.escapeHtml(App.levelName(c.level)) + '</td>' +
-          '<td>' + UI.fmtNumber(App.courseTrainees(c).length) + '</td>' +
-          '<td><div class="row-actions">' +
-          '<button class="link-btn" type="button" data-course-view="' + UI.escapeHtml(c.id) + '">عرض</button>';
+        var searchHay = (c.name + ' ' + (App.trainerName(c.trainerId) || '') + ' ' +
+          App.displayCode(c, 'courses')).toLowerCase();
+        html += '<div class="list-row clickable" data-course-open="' + UI.escapeHtml(c.id) + '"' +
+          ' data-course-search="' + UI.escapeHtml(searchHay) + '">' +
+          '<div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(c.name) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(c, 'courses')) + '</span> ' + completionPill(prog.status) + '</div>' +
+          '<div class="list-row-meta muted">' + UI.escapeHtml(App.trainerName(c.trainerId) || 'بلا مدرب') + ' · ' + UI.escapeHtml(App.levelName(c.level)) + ' · ' + UI.escapeHtml(UI.daysLabel(c.days)) + '</div>' +
+          '<div class="list-row-meta muted">' + UI.escapeHtml(halls.length ? halls.join(' · ') : 'بلا قاعات') + ' · الجلسات: ' + prog.done + '/' + prog.sessionsTotal + ' · المتبقية: ' + prog.sessionsRemaining + ' · المتدربون: ' + UI.fmtNumber(App.courseTrainees(c).length) + '</div>' +
+          '<div class="prog-row"><div class="progress"><i style="width:' + prog.pct + '%"></i></div><span class="muted">' + prog.pct + '%</span></div>' +
+          '</div>' +
+          '<div class="list-row-actions row-actions">' +
+          '<button class="btn btn-outline btn-sm" type="button" data-course-view="' + UI.escapeHtml(c.id) + '">عرض</button>';
         if (canWrite) {
-          html += '<button class="link-btn" type="button" data-course-edit="' + UI.escapeHtml(c.id) + '">تعديل</button>' +
-            '<button class="link-btn" type="button" data-course-rename="' + UI.escapeHtml(c.id) + '">إعادة تسمية</button>' +
-            '<button class="link-btn danger" type="button" data-course-del="' + UI.escapeHtml(c.id) + '">حذف</button>';
+          html += '<button class="btn btn-outline btn-sm" type="button" data-course-edit="' + UI.escapeHtml(c.id) + '">تعديل</button>' +
+            '<button class="btn btn-outline btn-sm" type="button" data-course-options="' + UI.escapeHtml(c.id) + '">خيارات</button>';
         }
-        html += '</div></td></tr>';
+        html += '</div></div>';
       });
-      html += '</tbody></table></div>';
     }
+    html += '<div class="muted" id="courses-no-results" hidden style="padding:12px 0">لا دورات مطابقة للبحث.</div>';
     html += '</div>';
 
     container.innerHTML = html;
+
+    // تصدير إحصاءات الدورات — مشترك بين زر الترويسة وزر لوحة الإحصاءات.
+    function exportCoursesStats(btn) {
+      if (btn) UI.setBtnLoading(btn, true, 'جارٍ تجهيز الإحصائيات…');
+      App.buildCoursesStatsData().then(function (data) {
+        UI.callExport('exportCoursesStats', [data]);
+      }).catch(UI.toastError).finally(function () { if (btn) UI.setBtnLoading(btn, false); });
+    }
+
+    // لوحة إحصاءات الدورات (v2.1، بند 10).
+    if (window.TadreebStats) {
+      var coursesPanelEl = container.querySelector('#courses-stats-panel');
+      var coursesRes = window.TadreebStats.computeCourses();
+      window.TadreebStats.renderPanel(coursesPanelEl, {
+        section: 'courses', title: 'إحصاءات الدورات', metrics: coursesRes.metrics,
+        // التصدير كان مقتصراً على الكتابة في الترويسة — نحافظ على ذلك هنا.
+        export: canWrite ? {
+          label: 'تصدير الإحصاءات ↓',
+          onClick: function () {
+            var b = coursesPanelEl ? coursesPanelEl.querySelector('[data-stats-export]') : null;
+            exportCoursesStats(b);
+          }
+        } : null
+      });
+      App.buildCoursesStatsData().then(function (d) {
+        window.TadreebStats.updateMetrics(coursesPanelEl, window.TadreebStats.coursesMetricsFromData(d));
+      }).catch(function () { /* تبقى المقاييس المتزامنة فقط */ });
+    }
 
     container.querySelectorAll('[data-filter]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -98,6 +129,30 @@
       currentLevelFilter = levelFilterSel.value;
       renderCourses(container);
     });
+    // البحث في القائمة (بالاسم أو المدرب أو المعرّف): إخفاء/إظهار
+    // صفوف DOM مباشرةً دون إعادة رسم حتى لا يفقد الحقل التركيز
+    // أثناء الكتابة؛ النص يبقى عند تبديل الفلاتر.
+    var searchInput = document.getElementById('courses-search');
+    function applyCourseSearch() {
+      var q = currentSearch.trim().toLowerCase();
+      var rows = container.querySelectorAll('[data-course-open]');
+      var visible = 0;
+      rows.forEach(function (row) {
+        var hay = row.getAttribute('data-course-search') || '';
+        var show = !q || hay.indexOf(q) !== -1;
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      var noRes = document.getElementById('courses-no-results');
+      if (noRes) noRes.hidden = !(q && visible === 0 && rows.length > 0);
+    }
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        currentSearch = searchInput.value;
+        applyCourseSearch();
+      });
+      applyCourseSearch();
+    }
     var newBtn = document.getElementById('new-course-btn');
     if (newBtn) newBtn.addEventListener('click', function () { openCourseForm(null); });
     var emptyNew = document.getElementById('courses-empty-new');
@@ -135,14 +190,49 @@
         if (course) requestDeleteCourse(course);
       });
     });
+    container.querySelectorAll('[data-course-options]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var course = App.Store.get('courses', btn.getAttribute('data-course-options'));
+        if (course) openCourseActionSheet(course);
+      });
+    });
 
     var statsBtn = document.getElementById('courses-stats-btn');
     if (statsBtn) {
-      statsBtn.addEventListener('click', function () {
-        UI.setBtnLoading(statsBtn, true, 'جارٍ تجهيز الإحصائيات…');
-        App.buildCoursesStatsData().then(function (data) {
-          UI.callExport('exportCoursesStats', [data]);
-        }).catch(UI.toastError).finally(function () { UI.setBtnLoading(statsBtn, false); });
+      statsBtn.addEventListener('click', function () { exportCoursesStats(statsBtn); });
+    }
+
+    var attStatsBtn = document.getElementById('courses-attendance-stats-btn');
+    if (attStatsBtn) {
+      attStatsBtn.addEventListener('click', function () {
+        if (!window.TadreebStats) {
+          UI.toast('إحصاءات الحضور غير متاحة حالياً', 'error');
+          return;
+        }
+        UI.openPicker({
+          title: 'إحصاءات الحضور',
+          columns: [
+            { id: 'name', label: 'الاسم', checked: true },
+            { id: 'present', label: 'موجود', checked: true },
+            { id: 'absent', label: 'غائب', checked: true },
+            { id: 'excused', label: 'معتذر', checked: true },
+            { id: 'unrecorded', label: 'بلا تسجيل', checked: true },
+            { id: 'total', label: 'إجمالي المسجل', checked: true },
+            { id: 'rate', label: 'نسبة الحضور %', checked: true }
+          ],
+          scopeOptions: [
+            { id: 'courses', label: 'حسب الدورة' },
+            { id: 'groups', label: 'حسب المجموعة' },
+            { id: 'trainees', label: 'حسب المتدرب' }
+          ],
+          onConfirm: function (result) {
+            UI.toast('جارٍ تجهيز إحصاءات الحضور…');
+            window.TadreebStats.exportData('attendance-stats', { scope: result.scope }).then(function (data) {
+              UI.callExport('exportAttendanceStats', [data, { columns: result.columns }]);
+            }).catch(UI.toastError);
+          }
+        });
       });
     }
 
@@ -208,6 +298,10 @@
   // حذف الدورة مع قاعدة الحماية: أي حضور مسجل يمنع الحذف نهائياً.
   // المعاينة أولاً (رسالة منع أو تأكيد بما سيُحذف)، ثم الحذف نفسه
   // يعيد فحص الحماية على مستوى طبقة البيانات قبل أي كتابة.
+  // v2.1 (بأمر بدر): حذف الدورة بتأكيد واضح فقط — بلا كلمة مرور.
+  // هذا الاستثناء لحذف الدورة فقط؛ إعادة المصادقة باقية لكل
+  // الإجراءات المدمّرة الأخرى (حذف المستخدمين وإعادة تعيين كلمات
+  // المرور في شاشة الإدارة).
   function requestDeleteCourse(course) {
     window.TadreebDB.courseDeletePreview(course.id).then(function (preview) {
       if (preview.withAttendance > 0) {
@@ -225,44 +319,112 @@
         });
         return;
       }
-      UI.confirmDialog('حذف الدورة',
-        'سيتم حذف الدورة «' + course.name + '» و ' + preview.sessions + ' جلسة و ' + preview.expenses +
-        ' مصروف. لا يمكن التراجع.',
-        function () {
-          // حذف الدورة إجراء مدمّر — يتطلب تأكيد هوية المدير
-          // (المعاينة → التأكيد → إعادة المصادقة → الحذف).
-          UI.requireReauth(function () {
-            window.TadreebDB.deleteCourse(course.id).then(function () {
-              UI.toast('تم حذف الدورة', 'success');
-              App.refresh();
-            }).catch(UI.toastError);
-          });
-        });
+      UI.openModal({
+        title: 'حذف الدورة',
+        bodyHTML: '<p>سيتم حذف الدورة «' + UI.escapeHtml(course.name) + '» نهائياً، مع:</p>' +
+          '<ul><li>' + preview.sessions + ' جلسة</li>' +
+          '<li>' + preview.expenses + ' مصروف</li></ul>' +
+          '<p>لا تحتوي أي جلسة من جلسات هذه الدورة على سجلات حضور. ' +
+          'سجلات الحضور محمية: لا يمكن حذف دورة فيها جلسات بسجلات حضور. ' +
+          'لا يمكن التراجع عن الحذف.</p>',
+        actions: [
+          {
+            label: 'تأكيد',
+            className: 'btn-danger-solid',
+            onClick: function (close) {
+              close();
+              window.TadreebDB.deleteCourse(course.id).then(function () {
+                UI.toast('تم حذف الدورة', 'success');
+                App.refresh();
+              }).catch(UI.toastError);
+            }
+          },
+          { label: 'إلغاء', className: 'btn-outline', closeOnClick: true }
+        ]
+      });
     }).catch(UI.toastError);
   }
 
   // ================= نموذج الدورة (إنشاء / تعديل) =================
+  // ورقة خيارات الدورة: القائمة الكاملة للإجراءات (عرض/تعديل/إعادة تسمية/
+  // حذف)، تُفتح من زر «خيارات» في صف الدورة. نفس نمط ورقة خيارات الجلسة
+  // (SessionScreen.openActionSheet): نفس واجهة UI.openModal ونفس أصناف
+  // .sheet / .sheet-summary / .sheet-actions / .sheet-action.
+  function openCourseActionSheet(course) {
+    var prog = App.courseProgress(course);
+    var summary = '<div class="sheet-summary">' +
+      '<div class="sheet-summary-title">' + UI.escapeHtml(course.name) + '</div>' +
+      '<div><span class="k">المعرّف</span> ' + UI.escapeHtml(App.displayCode(course, 'courses')) + '</div>' +
+      '<div><span class="k">المدرب</span> ' + UI.escapeHtml(App.trainerName(course.trainerId) || 'بلا مدرب') + '</div>' +
+      '<div><span class="k">الجلسات</span> ' + prog.done + '/' + prog.sessionsTotal + '</div>' +
+      '<div><span class="k">الحالة</span> ' + completionPill(prog.status) + '</div>' +
+      '</div>';
+    var actions = [
+      { key: 'view', label: 'عرض', attr: 'data-course-view' },
+      { key: 'edit', label: 'تعديل', attr: 'data-course-edit' },
+      { key: 'status', label: 'تغيير الحالة', attr: 'data-course-status' },
+      { key: 'rename', label: 'إعادة تسمية', attr: 'data-course-rename' },
+      { key: 'delete', label: 'حذف الدورة', attr: 'data-course-del', danger: true }
+    ];
+    var listHtml = actions.map(function (a) {
+      return '<button class="sheet-action' + (a.danger ? ' danger' : '') + '" type="button" ' + a.attr +
+        '="' + UI.escapeHtml(course.id) + '" data-sheet-action="' + a.key + '">' + a.label + '</button>';
+    }).join('');
+    var modal = UI.openModal({
+      title: 'خيارات الدورة',
+      width: 'normal',
+      bodyHTML: summary + '<div class="sheet-actions">' + listHtml + '</div>',
+      actions: [{ label: 'إغلاق', className: 'btn-outline', closeOnClick: true }]
+    });
+    if (modal.element) modal.element.classList.add('sheet');
+    if (!modal.element) return;
+    modal.element.querySelectorAll('[data-sheet-action]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-sheet-action');
+        modal.close();
+        if (key === 'view') App.showScreen('course-detail', { courseId: course.id });
+        else if (key === 'edit') openCourseForm(course);
+        else if (key === 'status') openCourseStatusModal(course);
+        else if (key === 'rename') openCourseRenameModal(course);
+        else if (key === 'delete') requestDeleteCourse(course);
+      });
+    });
+  }
+
+  // تغيير سريع لحالة الدورة دون فتح نموذج التعديل الكامل.
+  function openCourseStatusModal(course) {
+    var current = course.status || 'planned';
+    var opts = Object.keys(UI.COURSE_STATUS_LABELS).map(function (k) {
+      return '<option value="' + k + '"' + (k === current ? ' selected' : '') + '>' +
+        UI.escapeHtml(UI.COURSE_STATUS_LABELS[k]) + '</option>';
+    }).join('');
+    UI.openFormModal('تغيير حالة الدورة — ' + course.name,
+      '<div class="field"><label>الحالة</label><select name="status">' + opts + '</select></div>',
+      function (form, close, submitBtn) {
+        var status = form.querySelector('[name="status"]').value;
+        if (status === current) { close(); return; }
+        UI.setBtnLoading(submitBtn, true);
+        window.TadreebDB.update('courses', course.id, { status: status }).then(function () {
+          UI.setBtnLoading(submitBtn, false);
+          close();
+          UI.toast('تم تغيير حالة الدورة إلى «' + UI.COURSE_STATUS_LABELS[status] + '»', 'success');
+          App.refresh();
+        }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.toastError(err); });
+      }, { submitLabel: 'حفظ', width: 'normal' });
+  }
+
   function trainerOptionsHtml(selectedId) {
     var html = '<option value="">بدون مدرب حالياً</option>';
     App.Store.getAll('trainers').forEach(function (t) {
       html += '<option value="' + UI.escapeHtml(t.id) + '"' +
         (t.id === selectedId ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(t, 'trainers') + ' — ' + t.name) + '</option>';
     });
-    html += '<option value="__new__">إضافة مدرب جديد…</option>';
-    return html;
-  }
-
-  function periodOptionsHtml(selectedId) {
-    var periods = App.Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
-    var html = '<option value="">اختر الفترة</option>';
-    periods.forEach(function (p) {
-      html += '<option value="' + UI.escapeHtml(p.id) + '"' + (p.id === selectedId ? ' selected' : '') + '>' +
-        UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
-    });
+    html += '<option value="__new__">إضافة مدرب جديد +</option>';
     return html;
   }
 
   // خيارات المجموعة: «المعرّف — الاسم — المديرية»؛ آمنة مع قائمة مجموعات فارغة.
+  // خيار «إضافة مجموعة جديدة +» يفتح نافذة الإضافة السريعة (v2.1).
   function groupOptionsHtml(selectedId) {
     var groups = App.Store.getAll('groups').slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
@@ -273,10 +435,12 @@
       html += '<option value="' + UI.escapeHtml(g.id) + '"' + (g.id === selectedId ? ' selected' : '') + '>' +
         UI.escapeHtml(App.displayCode(g, 'groups') + ' — ' + g.name + (dn ? ' — ' + dn : '')) + '</option>';
     });
+    html += '<option value="__new__">إضافة مجموعة جديدة +</option>';
     return html;
   }
 
   // خيارات المديرية المعيّنة (حقل منفرد، غير خانات المديريات المتعددة).
+  // خيار «إضافة مديرية جديدة +» يفتح نافذة الإضافة السريعة (v2.1).
   function assignedDirectorateOptionsHtml(selectedId) {
     var dirs = App.Store.getAll('directorates').slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
@@ -286,6 +450,7 @@
       html += '<option value="' + UI.escapeHtml(d.id) + '"' + (d.id === selectedId ? ' selected' : '') + '>' +
         UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
     });
+    html += '<option value="__new__">إضافة مديرية جديدة +</option>';
     return html;
   }
 
@@ -326,6 +491,8 @@
   }
 
   // خيارات قاعة اليوم في الخطة الأسبوعية: «تلقائي» (قيمة فارغة) أولاً.
+  // إن كانت قائمة القاعات فارغة يُضاف خيار «إضافة قاعة جديدة +»
+  // (الإضافة السريعة v2.1) — وإلا فإدارة القاعات من الدليل.
   function hallOptionsHtml(selectedId) {
     var halls = App.Store.getAll('halls').slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
@@ -335,6 +502,7 @@
       html += '<option value="' + UI.escapeHtml(h.id) + '"' + (h.id === selectedId ? ' selected' : '') + '>' +
         UI.escapeHtml(h.name) + '</option>';
     });
+    if (!halls.length) html += '<option value="__new__">إضافة قاعة جديدة +</option>';
     return html;
   }
 
@@ -366,6 +534,329 @@
     return g.name + (dn ? ' — ' + dn : '');
   }
 
+  // ---------- تنسيق الوقت بنظام 12 ساعة (v2.1، بند 8) ----------
+  // العرض فقط بنظام 12 ساعة مع ص/م؛ التخزين يبقى 24 ساعة (HH:MM).
+  // تستخدم TadreebTime.formatTimeRange12 عند توفرها (يضيفها عامل
+  // موازٍ إلى datetime.js)، وإلا تعود إلى النص الخام 24 ساعة.
+  function fmtRange12(start, end) {
+    try {
+      if (window.TadreebTime && typeof window.TadreebTime.formatTimeRange12 === 'function') {
+        return window.TadreebTime.formatTimeRange12(start, end);
+      }
+    } catch (e) { /* احتياطي أدناه */ }
+    return (start || '') + ' - ' + (end || '');
+  }
+
+  function byNameAsc(a, b) {
+    return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+  }
+
+  function sortedPeriods() {
+    return App.Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+  }
+
+  // ================= الإضافة السريعة داخل نموذج الدورة (v2.1) =================
+  // نافذة صغيرة فوق نموذج الدورة لإنشاء سجل دليل على الفور (المجموعة
+  // والمديرية والقاعة)، بالحقول نفسها التي تستخدمها شاشة الدليل
+  // (الاسم + المعرّف التلقائي + حقلا النوع)، ثم يُختار الجديد فوراً
+  // في القائمة المنسدلة. المدرب له نموذج مضمّن داخل نموذج الدورة
+  // أصلاً (cf-new-trainer) فيبقى كما هو. الدليل يبقى مكان الإدارة
+  // الكاملة؛ هذه اختصار فقط.
+  var QUICK_ADD_META = {
+    group: { col: 'groups', title: 'مجموعة تدريبية', label: 'المجموعة' },
+    directorate: { col: 'directorates', title: 'مديرية', label: 'المديرية' },
+    hall: { col: 'halls', title: 'قاعة', label: 'القاعة' }
+  };
+
+  function quickAddDirectorateOptionsHtml(selectedId) {
+    var html = '<option value="">اختر المديرية</option>';
+    App.Store.getAll('directorates').slice().sort(byNameAsc).forEach(function (d) {
+      html += '<option value="' + UI.escapeHtml(d.id) + '"' + (d.id === selectedId ? ' selected' : '') + '>' +
+        UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
+    });
+    html += '<option value="__new__">إضافة مديرية جديدة +</option>';
+    return html;
+  }
+
+  function quickAddFieldsHtml(kind) {
+    var meta = QUICK_ADD_META[kind];
+    var codeField = '<div class="field"><label>المعرّف *</label><input type="text" name="code" required value="' +
+      UI.escapeHtml(App.nextCode(meta.col)) + '"></div>';
+    if (kind === 'directorate') {
+      return '<div class="field"><label>اسم المديرية *</label><input type="text" name="name" required></div>' + codeField;
+    }
+    if (kind === 'hall') {
+      return '<div class="field"><label>اسم القاعة *</label><input type="text" name="name" required></div>' + codeField +
+        '<div class="field"><label>السعة (عدد المتدربين)</label><input type="number" name="capacity" min="0"></div>';
+    }
+    if (kind === 'group') {
+      return '<div class="field"><label>اسم المجموعة *</label><input type="text" name="name" required placeholder="مثال: مجموعة الإدارة العامة"></div>' +
+        codeField +
+        '<div class="field"><label>المديرية *</label><select name="directorateId" required>' +
+        quickAddDirectorateOptionsHtml(null) + '</select>' +
+        '<div class="field-hint">إن لم تكن المديرية مسجلة، اختر «إضافة مديرية جديدة +».</div></div>';
+    }
+    return '';
+  }
+
+  // قراءة بيانات الإضافة السريعة وتحققها (مطابقة لتحقق الدليل:
+  // الاسم مطلوب، والمعرّف مطلوب وفريد، والمجموعة تنتمي إلى مديرية).
+  // تُرجع كائن البيانات أو null بعد إظهار الخطأ في النموذج.
+  function quickAddReadData(kind, form) {
+    var meta = QUICK_ADD_META[kind];
+    var v = function (name) {
+      var el = form.querySelector('[name="' + name + '"]');
+      return el ? el.value.trim() : '';
+    };
+    var name = v('name');
+    var code = v('code');
+    if (!name) { UI.formError(form, 'الاسم مطلوب'); return null; }
+    if (!code) { UI.formError(form, 'المعرّف مطلوب'); return null; }
+    if (!App.isCodeUnique(meta.col, code, null)) {
+      UI.formError(form, 'هذا المعرّف مستخدم من قبل — اختر معرّفاً آخر');
+      return null;
+    }
+    if (kind === 'directorate') return { name: name, code: code };
+    if (kind === 'hall') {
+      var cap = form.querySelector('[name="capacity"]').value;
+      return { name: name, code: code, capacity: cap === '' ? null : parseInt(cap, 10) };
+    }
+    if (kind === 'group') {
+      var dirId = form.querySelector('[name="directorateId"]').value;
+      if (!dirId || dirId === '__new__') { UI.formError(form, 'المديرية مطلوبة — المجموعة تنتمي إلى مديرية'); return null; }
+      return { name: name, code: code, directorateId: dirId, traineeIds: [] };
+    }
+    return null;
+  }
+
+  // openQuickAddModal(kind, onSaved(newId), onCancelled)
+  // onSaved تُستدعى بعد الحفظ وتحديث المتجر؛ onCancelled عند إغلاق
+  // النافذة دون حفظ (إلغاء/✕/Escape) ليعيد المستدعي قائمته إلى
+  // قيمتها السابقة بدل بقاء «__new__» محدداً.
+  function openQuickAddModal(kind, onSaved, onCancelled) {
+    var meta = QUICK_ADD_META[kind];
+    if (!meta) return;
+    var saved = false;
+    var modal = UI.openFormModal('إضافة ' + meta.title, quickAddFieldsHtml(kind), function (form, close, submitBtn) {
+      var data = quickAddReadData(kind, form);
+      if (!data) return;
+      UI.formError(form, '');
+      UI.setBtnLoading(submitBtn, true);
+      window.TadreebDB.add(meta.col, data).then(function (newId) {
+        saved = true;
+        UI.setBtnLoading(submitBtn, false);
+        close();
+        UI.toast('تمت إضافة ' + meta.label, 'success');
+        var done = function () { if (typeof onSaved === 'function') onSaved(newId); };
+        var rp = App.refresh();
+        if (rp && typeof rp.then === 'function') rp.then(done, done);
+        else done();
+      }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.formError(form, err.message); });
+    }, {
+      submitLabel: 'إضافة',
+      width: 'normal',
+      onClose: function () {
+        if (!saved && typeof onCancelled === 'function') onCancelled();
+      }
+    });
+    // في نموذج المجموعة: خيار «إضافة مديرية جديدة +» يفتح نافذة
+    // مديرية فوقها، ثم يُحدَّث حقل المديرية ويُختار الجديد فوراً —
+    // فينشأ مسار كامل من قوائم فارغة (مديرية ← مجموعة ← دورة).
+    if (kind === 'group' && modal && modal.element) {
+      var dirSel = modal.element.querySelector('[name="directorateId"]');
+      if (dirSel) dirSel.addEventListener('change', function () {
+        if (dirSel.value !== '__new__') return;
+        dirSel.value = '';
+        openQuickAddModal('directorate', function (newDirId) {
+          dirSel.innerHTML = quickAddDirectorateOptionsHtml(newDirId);
+          dirSel.value = newDirId;
+        });
+      });
+    }
+  }
+
+  // صفوف خانات المديريات المتعددة في نموذج الدورة (تُبنى عند فتح
+  // النموذج وتُعاد عند إضافة مديرية سريعاً مع الحفاظ على المحدد).
+  function directorateCheckRowsHtml(checkedSet) {
+    return App.Store.getAll('directorates').slice().sort(byNameAsc).map(function (d) {
+      return '<label class="check-row"><input type="checkbox" data-dir-id="' + UI.escapeHtml(d.id) + '"' +
+        (checkedSet && checkedSet.has(d.id) ? ' checked' : '') + '> ' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</label>';
+    }).join('');
+  }
+
+  // ================= رزنامة جلسات الدورة (v2.1، بند 5) =================
+  // نص تحذير تعارض القاعة — صياغة بدر حرفياً.
+  var HALL_CONFLICT_WARNING = 'تحذير: القاعة محجوزة — غير متاحة في الفترات المحددة';
+
+  // خريطة إشغال القاعات من المتجر الحي: «date|periodId» ← {hallId: true}.
+  // القواعد نفسها التي يستخدمها checkHallAvailability وتوليد الجدول:
+  // الجلسة المجدولة (غير الملغاة ولا العطلة) والاجتماع العارض المجدول
+  // (غير الملغى) يشغلان القاعة. excludeCourseId يستثني جلسات دورة
+  // واحدة (الدورة الجاري تعديلها — جلستها لا تعارض نفسها).
+  function buildHallOccupancy(excludeCourseId) {
+    var occupied = {};
+    function mark(date, periodId, hallId) {
+      if (!date || !periodId || !hallId) return;
+      var key = date + '|' + periodId;
+      if (!occupied[key]) occupied[key] = {};
+      occupied[key][hallId] = true;
+    }
+    App.Store.getAll('sessions').forEach(function (s) {
+      if (excludeCourseId && s.courseId === excludeCourseId) return;
+      if (s.state === 'cancelled' || s.state === 'holiday') return;
+      mark(s.date, s.periodId, s.hallId);
+    });
+    App.Store.getAll('meetings').forEach(function (m) {
+      if (m.status === 'cancelled') return;
+      mark(m.date, m.periodId, m.hallId);
+    });
+    return occupied;
+  }
+
+  function isHallOccupied(occupied, date, periodId, hallId) {
+    var set = occupied[date + '|' + periodId];
+    return !!(set && set[hallId]);
+  }
+
+  function freeHallsFor(occupied, date, periodId) {
+    return App.Store.getAll('halls').slice().sort(byNameAsc).filter(function (h) {
+      return !isHallOccupied(occupied, date, periodId, h.id);
+    });
+  }
+
+  function calAddDays(dateStr, n) {
+    var d = UI.parseDateStr(dateStr);
+    if (!d) return null;
+    d.setDate(d.getDate() + n);
+    return UI.dateToStr(d);
+  }
+
+  function calWeekday(dateStr) {
+    var d = UI.parseDateStr(dateStr);
+    return d ? d.getDay() : -1;
+  }
+
+  // ترتيب الجلسات المختارة زمنياً، ثم بترتيب الفترة داخل اليوم.
+  function sortPicks(picks) {
+    var order = {};
+    sortedPeriods().forEach(function (p) { order[p.id] = p.order || 0; });
+    return picks.slice().sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (order[a.periodId] || 0) - (order[b.periodId] || 0);
+    });
+  }
+
+  // اشتقاق نمط الدورة (الأيام/الفترة/الخطة الأسبوعية) من الجلسات
+  // المختارة في الرزنامة + الأيام المفضلة — ليبقى سجل الدورة متوافقاً
+  // مع توليد الجدول وإعادة التوليد وعرض التفاصيل:
+  // الأيام = اتحاد الأيام المفضلة وأيام الجلسات المختارة؛ الفترة
+  // الرئيسية = فترة أول جلسة مختارة (بفترة موجودة)؛ الخطة الأسبوعية
+  // = فترة وقاعة أول جلسة مختارة في كل يوم، والفترة الرئيسية وقاعة
+  // تلقائية للأيام المفضلة بلا جلسات مختارة.
+  // fallback (للتعديل): {periodId, dayPlan} من الدورة الحالية،
+  // تُستخدم عند غياب الاختيارات.
+  function deriveCoursePattern(picks, checkedDays, fallback) {
+    var daySet = {};
+    (checkedDays || []).forEach(function (d) { daySet[d] = true; });
+    var byDay = {};
+    (picks || []).forEach(function (p) {
+      var wd = calWeekday(p.date);
+      if (wd < 0) return;
+      daySet[wd] = true;
+      if (!byDay[wd]) byDay[wd] = p;
+    });
+    var days = Object.keys(daySet).map(function (k) { return parseInt(k, 10); })
+      .sort(function (a, b) { return a - b; });
+    var mainPeriodId = null;
+    var ordered = sortPicks(picks || []);
+    for (var i = 0; i < ordered.length; i++) {
+      if (App.Store.get('periods', ordered[i].periodId)) { mainPeriodId = ordered[i].periodId; break; }
+    }
+    if (!mainPeriodId && ordered.length) mainPeriodId = ordered[0].periodId;
+    if (!mainPeriodId && fallback) mainPeriodId = fallback.periodId || null;
+    var dayPlan = {};
+    days.forEach(function (d) {
+      var p = byDay[d];
+      if (p) dayPlan[d] = { periodId: p.periodId, hallId: p.hallId || null };
+      else if (fallback && fallback.dayPlan && fallback.dayPlan[d]) {
+        dayPlan[d] = {
+          periodId: fallback.dayPlan[d].periodId || mainPeriodId,
+          hallId: fallback.dayPlan[d].hallId || null
+        };
+      } else dayPlan[d] = { periodId: mainPeriodId, hallId: null };
+    });
+    return { days: days, periodId: mainPeriodId, dayPlan: dayPlan };
+  }
+
+  // تعارضات القاعات في الاختيارات الحالية: كل اختيار قاعته المختارة
+  // صراحةً محجوزة في موعده (جلسة أو اجتماع عارض).
+  function calPickConflicts(picks, excludeCourseId) {
+    var occupied = buildHallOccupancy(excludeCourseId);
+    return (picks || []).filter(function (p) {
+      return p.hallId && isHallOccupied(occupied, p.date, p.periodId, p.hallId);
+    });
+  }
+
+  // إنشاء جلسات الدورة الجديدة من اختيارات الرزنامة مباشرة — سجلات
+  // الجلسات مطابقة لما ينتجه توليد الجدول (الحقول نفسها). القاعة
+  // «تلقائي» تُحل إلى أول قاعة حرة (بالترتيب الأبجدي كما في المولّد)؛
+  // إن لم توجد قاعة حرة تُنشأ الجلسة بلا قاعة وتُذكر في
+  // unassignedHalls. العطل تُتخطى (لا يمكن اختيارها من الرزنامة
+  // أصلاً؛ هذا فحص أخير). تُرجع Promise بنفس شكل نتيجة
+  // generateSchedule لتُعرض في نافذة النتيجة نفسها.
+  function createPickedSessions(courseId, picks) {
+    var holidays = {};
+    App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
+    var occupied = buildHallOccupancy(null);
+    var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
+    var result = { created: 0, skippedHolidays: 0, unassignedHalls: [] };
+    var docs = [];
+    sortPicks(picks || []).forEach(function (pick) {
+      if (holidays[pick.date]) { result.skippedHolidays++; return; }
+      var hallId = null;
+      if (pick.hallId) {
+        // فحص أخير: القاعة المختارة قد تُحجز في هذه الأثناء.
+        if (!isHallOccupied(occupied, pick.date, pick.periodId, pick.hallId)) {
+          hallId = pick.hallId;
+        } else {
+          result.unassignedHalls.push(pick.date);
+        }
+      } else {
+        var free = halls.filter(function (h) { return !isHallOccupied(occupied, pick.date, pick.periodId, h.id); });
+        if (free.length) hallId = free[0].id;
+        else result.unassignedHalls.push(pick.date);
+      }
+      if (hallId) {
+        var key = pick.date + '|' + pick.periodId;
+        if (!occupied[key]) occupied[key] = {};
+        occupied[key][hallId] = true;
+      }
+      docs.push({
+        courseId: courseId,
+        date: pick.date,
+        periodId: pick.periodId,
+        hallId: hallId,
+        state: 'scheduled',
+        note: '',
+        trainerPresent: null,
+        mergedFrom: null
+      });
+    });
+    // الاختيارات مواعيد مميزة (شريحة واحدة لكل يوم+فترة) فلا تعارض
+    // داخل الدفعة نفسها — تُنشأ على دفعات متوازية من 10.
+    var chain = Promise.resolve();
+    for (var i = 0; i < docs.length; i += 10) {
+      (function (chunk) {
+        chain = chain.then(function () {
+          return Promise.all(chunk.map(function (doc) {
+            return window.TadreebDB.add('sessions', doc);
+          })).then(function () { result.created += chunk.length; });
+        });
+      })(docs.slice(i, i + 10));
+    }
+    return chain.then(function () { return result; });
+  }
+
   function openCourseForm(course) {
     var isEdit = !!course;
     var Store = App.Store;
@@ -387,10 +878,7 @@
         ' <span class="muted">(' + UI.escapeHtml(App.displayCode(t, 'trainees')) + ' · ' + UI.escapeHtml(App.directorateName(t.directorateId) || 'بلا مديرية') + ')</span></label>';
     }).join('');
 
-    var dirRows = directorates.map(function (d) {
-      return '<label class="check-row"><input type="checkbox" data-dir-id="' + UI.escapeHtml(d.id) + '"' +
-        (selectedDirectorates.has(d.id) ? ' checked' : '') + '> ' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</label>';
-    }).join('');
+    var dirRows = directorateCheckRowsHtml(selectedDirectorates);
 
     var dayBoxes = UI.WEEKDAYS.map(function (name, i) {
       return '<label class="day-chip' + (selectedDays.has(i) ? ' checked' : '') + '"><input type="checkbox" data-day="' +
@@ -409,7 +897,6 @@
       '<div class="field-hint">تُملأ تلقائياً عند اختيار مجموعة، ويمكن تغييرها يدوياً.</div></div>' +
       '<div class="field"><label>المستوى</label><select name="level">' + levelOptionsHtml(course ? course.level : 'none') + '</select>' +
       '<div class="field-hint">المستويات المخصصة تُدار من إعدادات المنصة.</div></div>' +
-      '<div class="field"><label>الفترة التدريبية *</label><select name="periodId" required>' + periodOptionsHtml(course ? course.periodId : null) + '</select></div>' +
       '<div class="field"><label>عدد الجلسات *</label><input type="number" name="sessionCount" min="1" max="200" required value="' +
       UI.escapeHtml(course ? course.sessionCount : 20) + '"></div>' +
       '<div class="field"><label>تاريخ بدء الدورة</label><input type="date" name="startDate" value="' +
@@ -420,16 +907,21 @@
         Object.keys(UI.COURSE_STATUS_LABELS).map(function (k) {
           return '<option value="' + k + '"' + (course.status === k ? ' selected' : '') + '>' + UI.COURSE_STATUS_LABELS[k] + '</option>';
         }).join('') + '</select></div>' : '') +
-      (!isEdit ? '<div class="field"><label>توليد الجدول لعدد أسابيع</label><select name="weeks">' +
-        '<option value="1">أسبوع واحد</option><option value="2" selected>أسبوعان</option>' +
-        '<option value="3">3 أسابيع</option><option value="4">4 أسابيع</option></select>' +
-        '<div class="field-hint">يُنشئ الجلسات أسبوعاً بعد أسبوع ويتخطى العطل تلقائياً.</div></div>' : '') +
-      '<div class="field field-full"><label>أيام الدورة الأسبوعية *</label><div class="day-picker">' + dayBoxes + '</div></div>' +
-      '<div class="field field-full"><label>الخطة الأسبوعية</label><div id="cf-dayplan"></div>' +
-      '<div class="field-hint">فترة وقاعة مستقلتان لكل يوم؛ «تلقائي» يعني أول قاعة حرة في ذلك اليوم. تغيير الفترة الرئيسية يعيد ضبط خطة كل الأيام.' +
-      (isEdit ? ' تُطبَّق الخطة على الجلسات الجديدة عند إعادة توليد الجدول — الجلسات الحالية لا تتغير.' : '') + '</div></div>' +
-      '<div class="field field-full"><label>المديريات</label>' +
-      (dirRows ? '<div class="check-list">' + dirRows + '</div>' : '<div class="muted">لا مديريات مسجلة — أضف مديرية من الدليل أولاً.</div>') + '</div>' +
+      '<div class="field field-full"><label>الأيام الأسبوعية المفضلة</label><div class="day-picker">' + dayBoxes + '</div>' +
+      '<div class="field-hint">تُستخدم لحساب مدة الرزنامة أدناه — ويمكنك اختيار جلسات في أي يوم من الرزنامة.</div></div>' +
+      '<div class="field field-full"><label>رزنامة جلسات الدورة *</label>' +
+      '<div id="cf-cal-summary" style="font-weight:600;margin-bottom:8px"></div>' +
+      '<div id="cf-cal-warnings" hidden></div>' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<label for="cf-cal-defaulthall" style="font-weight:600">القاعة الافتراضية للجلسات:</label>' +
+      '<select id="cf-cal-defaulthall" class="input" style="flex:1;min-width:160px">' + hallOptionsHtml(null) + '</select></div>' +
+      '<div id="cf-calendar" style="max-height:50vh;overflow-y:auto"></div>' +
+      '<div style="margin-top:10px"><button type="button" class="btn btn-outline btn-sm" id="cf-cal-more">إظهار أسابيع إضافية</button></div>' +
+      '<div class="field-hint">' + (isEdit ?
+        'الجلسات الحالية محددة مسبقاً. تغيير التحديد هنا يحدّث أيام الدورة وفترتها فقط — لإضافة جلسة أو حذفها استخدم جدول الجلسات في تفاصيل الدورة.' :
+        'انقر على فترة في أي يوم لاختيارها جلسةً في الدورة — ويمكنك اختيار أكثر من فترة في اليوم الواحد. أيام العطل بلا جلسات.') + '</div></div>' +
+      '<div class="field field-full"><label>المديريات</label><div id="cf-directorate-list">' +
+      (dirRows ? '<div class="check-list">' + dirRows + '</div>' : '<div class="muted">لا مديريات مسجلة — أضف مديرية من قائمة «المديرية المعيّنة» أعلاه.</div>') + '</div></div>' +
       '<div class="field field-full"><label>المتدربون</label>' +
       '<div class="field-hint" id="cf-group-trainee-hint" hidden></div>' +
       '<input type="text" class="check-list-search" id="cf-trainee-search" placeholder="ابحث بالاسم…">' +
@@ -451,7 +943,7 @@
       '</div>';
 
     var modal = UI.openFormModal(isEdit ? 'تعديل الدورة' : 'دورة جديدة', fields, function (form, close, submitBtn) {
-      submitCourseForm(form, close, submitBtn, course, isEdit);
+      submitCourseForm(form, close, submitBtn, course, isEdit, calPicksList());
     }, { submitLabel: isEdit ? 'حفظ التعديلات' : 'إنشاء الدورة وتوليد الجدول', width: 'xwide' });
 
     // تفاعلات النموذج
@@ -492,10 +984,48 @@
           }
         }
       };
+      var prevGroupValue = course ? (course.groupId || '') : '';
+      var prevAssignedDirValue = course ? (course.directorateId || '') : '';
       groupSelect.addEventListener('change', function () {
+        if (groupSelect.value === '__new__') {
+          openQuickAddModal('group', function (newId) {
+            refreshDirectorySelects();
+            groupSelect.value = newId;
+            prevGroupValue = newId;
+            var ng = App.Store.get('groups', newId);
+            if (ng && ng.directorateId) {
+              assignedDirSelect.value = ng.directorateId;
+              prevAssignedDirValue = ng.directorateId;
+            }
+            syncGroupTrainees();
+          }, function () {
+            groupSelect.value = prevGroupValue;
+          });
+          return;
+        }
+        prevGroupValue = groupSelect.value;
         var g = groupSelect.value ? App.Store.get('groups', groupSelect.value) : null;
-        if (g && g.directorateId) assignedDirSelect.value = g.directorateId;
+        if (g && g.directorateId) {
+          assignedDirSelect.value = g.directorateId;
+          prevAssignedDirValue = g.directorateId;
+        }
         syncGroupTrainees();
+      });
+      // الإضافة السريعة للمديرية المعيّنة: بعد الحفظ تُحدَّث كل
+      // قوائم المديريات في النموذج (المنفردة والمتعددة ومديرية
+      // المتدرب الجديد) ويُختار الجديد في الحقل المنفرد.
+      assignedDirSelect.addEventListener('change', function () {
+        if (assignedDirSelect.value !== '__new__') {
+          prevAssignedDirValue = assignedDirSelect.value;
+          return;
+        }
+        openQuickAddModal('directorate', function (newId) {
+          refreshDirectorySelects();
+          assignedDirSelect.value = newId;
+          prevAssignedDirValue = newId;
+        }, function () {
+          assignedDirSelect.value = prevAssignedDirValue;
+        });
       });
       syncGroupTrainees();
     }
@@ -515,74 +1045,385 @@
       });
     });
 
-    // الخطة الأسبوعية: فترة وقاعة لكل يوم مختار (v1.1).
-    // dayPlanState يحفظ تعديلات المستخدم أثناء إعادة الرسم؛ تغيير
-    // الفترة الرئيسية يعيد ضبط فترة كل الأيام إلى قيمتها الجديدة.
-    var dayPlanState = {};
-    if (course && course.dayPlan) {
-      Object.keys(course.dayPlan).forEach(function (k) {
-        var e = course.dayPlan[k];
-        if (e) dayPlanState[k] = { periodId: e.periodId || '', hallId: e.hallId || null };
+    // ---------- إعادة بناء قوائم الدليل بعد إضافة سريعة ----------
+    // تُعاد كل قوائم الدليل داخل النموذج من المتجر الحي مع الحفاظ
+    // على المحدد حالياً (القيمة '__new__' تعود فارغة — المستدعي
+    // يختار الجديد صراحةً بعدها).
+    function refreshDirectorateLists() {
+      var listEl = card.querySelector('#cf-directorate-list');
+      if (listEl) {
+        var checked = new Set();
+        listEl.querySelectorAll('[data-dir-id]:checked').forEach(function (cb) {
+          checked.add(cb.getAttribute('data-dir-id'));
+        });
+        var rows = directorateCheckRowsHtml(checked);
+        listEl.innerHTML = rows ?
+          '<div class="check-list">' + rows + '</div>' :
+          '<div class="muted">لا مديريات مسجلة — أضف مديرية من قائمة «المديرية المعيّنة» أعلاه.</div>';
+      }
+      var ntSel = card.querySelector('[name="newTraineeDirectorate"]');
+      if (ntSel) {
+        var cur = ntSel.value;
+        var html = '<option value="">اختر المديرية</option>';
+        App.Store.getAll('directorates').slice().sort(byNameAsc).forEach(function (d) {
+          html += '<option value="' + UI.escapeHtml(d.id) + '"' + (d.id === cur ? ' selected' : '') + '>' +
+            UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
+        });
+        ntSel.innerHTML = html;
+        ntSel.value = cur;
+      }
+    }
+
+    function refreshDirectorySelects() {
+      var gs = card.querySelector('select[name="groupId"]');
+      if (gs) {
+        var gv = gs.value === '__new__' ? '' : gs.value;
+        gs.innerHTML = groupOptionsHtml(gv || null);
+        gs.value = gv;
+      }
+      var ds = card.querySelector('select[name="directorateId"]');
+      if (ds) {
+        var dv = ds.value === '__new__' ? '' : ds.value;
+        ds.innerHTML = assignedDirectorateOptionsHtml(dv || null);
+        ds.value = dv;
+      }
+      var dh = card.querySelector('#cf-cal-defaulthall');
+      if (dh) {
+        var hv = dh.value === '__new__' ? '' : dh.value;
+        dh.innerHTML = hallOptionsHtml(hv || null);
+        dh.value = hv;
+      }
+      refreshDirectorateLists();
+      renderCalendar(false);
+    }
+
+    // ---------- رزنامة جلسات الدورة (v2.1، بند 5) ----------
+    // calPicks: «date|periodId» ← {date, periodId, hallId}؛ hallId
+    // فارغ يعني «تلقائي» (أول قاعة حرة عند الإنشاء). عند التعديل
+    // تُملأ من جلسات الدورة الحالية (عدا الملغاة والعطلة).
+    var calPicks = {};
+    var calWeeksShown = 4;
+    var calOccupied = {};
+    if (isEdit) {
+      App.sessionsForCourse(course.id).forEach(function (s) {
+        if (s.state === 'cancelled' || s.state === 'holiday') return;
+        calPicks[s.date + '|' + s.periodId] = { date: s.date, periodId: s.periodId, hallId: s.hallId || null };
       });
     }
-    var dayPlanEl = card.querySelector('#cf-dayplan');
-    var mainPeriodSel = card.querySelector('select[name="periodId"]');
-    function dayPlanDays() {
+
+    function calPicksList() {
+      return sortPicks(Object.keys(calPicks).map(function (k) { return calPicks[k]; }));
+    }
+
+    function calCheckedDays() {
       var out = [];
       card.querySelectorAll('[data-day]:checked').forEach(function (cb) {
         out.push(parseInt(cb.getAttribute('data-day'), 10));
       });
       return out.sort(function (a, b) { return a - b; });
     }
-    function renderDayPlan() {
-      if (!dayPlanEl) return;
-      var days = dayPlanDays();
-      if (!days.length) {
-        dayPlanEl.innerHTML = '<div class="muted">اختر يوماً واحداً على الأقل لتعيين خطته.</div>';
-        return;
+
+    function calSessionCountVal() {
+      var el = card.querySelector('[name="sessionCount"]');
+      return el ? (parseInt(el.value, 10) || 0) : 0;
+    }
+
+    function calStartDateVal() {
+      var el = card.querySelector('[name="startDate"]');
+      return (el && el.value) || UI.todayStr();
+    }
+
+    // مدة الرزنامة الأولية: عند اختيار أيام مفضلة تُحسب من عدد
+    // الجلسات والأيام (أسابيع كافية للعدد المطلوب، 4 على الأقل، و12
+    // كحد أقصى للعرض الأولي)؛ بلا أيام مختارة تبقى 4 أسابيع فقط —
+    // وإلا قفزت الرزنامة إلى 12 أسبوعاً افتراضياً من قسمة العدد على
+    // 1. قابلة للتمديد بزر «أسابيع إضافية» حتى 52 أسبوعاً.
+    function calComputeWeeks() {
+      var days = calCheckedDays().length;
+      if (!days) return 4;
+      var sc = calSessionCountVal();
+      var w = Math.ceil(sc / days);
+      if (!isFinite(w) || w < 4) w = 4;
+      if (w > 12) w = 12;
+      return w;
+    }
+
+    function calHallSelectOptions(pick) {
+      var html = '<option value="">تلقائي (أول قاعة حرة)</option>';
+      var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
+      halls.forEach(function (h) {
+        var busy = isHallOccupied(calOccupied, pick.date, pick.periodId, h.id);
+        html += '<option value="' + UI.escapeHtml(h.id) + '"' + (h.id === pick.hallId ? ' selected' : '') + '>' +
+          UI.escapeHtml(h.name + (busy ? ' (محجوزة)' : '')) + '</option>';
+      });
+      if (!halls.length) html += '<option value="__new__">إضافة قاعة جديدة +</option>';
+      return html;
+    }
+
+    // ملاحظة صف القاعة: تحذير التعارض (بصياغة بدر حرفياً مع سياق
+    // الموعد) أو تنبيه غياب قاعة حرة للخيار التلقائي — أو ''.
+    // ملاحظة: لا نستخدم صنف .form-error هنا أبداً، لأن
+    // UI.formError تكتب في أول .form-error داخل النموذج.
+    function calHallNoteHtml(pick) {
+      if (pick.hallId && isHallOccupied(calOccupied, pick.date, pick.periodId, pick.hallId)) {
+        return '<div class="cf-hall-warning" style="color:#B91C1C;font-size:13px;margin-top:6px;font-weight:600">' +
+          UI.escapeHtml(HALL_CONFLICT_WARNING + ' (' + (App.hallName(pick.hallId) || '') + '، ' +
+            UI.fmtDateFull(pick.date) + '، ' + App.periodLabel(pick.periodId) + ')') + '</div>';
       }
-      var html = '';
-      days.forEach(function (d) {
-        var cur = dayPlanState[d] || { periodId: mainPeriodSel ? mainPeriodSel.value : '', hallId: null };
-        html += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' +
-          '<span style="min-width:64px;font-weight:600">' + UI.escapeHtml(UI.WEEKDAYS[d]) + '</span>' +
-          '<select class="input" data-dayplan-period="' + d + '" style="flex:1;width:auto;min-width:0">' +
-          periodOptionsHtml(cur.periodId || (mainPeriodSel ? mainPeriodSel.value : null)) + '</select>' +
-          '<select class="input" data-dayplan-hall="' + d + '" style="flex:1;width:auto;min-width:0">' +
-          hallOptionsHtml(cur.hallId) + '</select></div>';
-      });
-      dayPlanEl.innerHTML = html;
+      if (!pick.hallId && !freeHallsFor(calOccupied, pick.date, pick.periodId).length) {
+        return '<div class="cf-nohall-note muted" style="margin-top:6px">لا توجد قاعة حرة في هذا الموعد — ستُنشأ الجلسة بلا قاعة.</div>';
+      }
+      return '';
     }
-    if (dayPlanEl) {
-      dayPlanEl.addEventListener('change', function (e) {
-        var t = e.target;
-        var d = t.getAttribute('data-dayplan-period');
-        var isPeriod = d != null;
-        if (!isPeriod) d = t.getAttribute('data-dayplan-hall');
-        if (d == null) return;
-        if (!dayPlanState[d]) {
-          dayPlanState[d] = { periodId: mainPeriodSel ? mainPeriodSel.value : '', hallId: null };
+
+    function calHallRowHtml(pick) {
+      var key = pick.date + '|' + pick.periodId;
+      return '<div class="cf-session-hall" data-cf-hallrow="' + key + '" style="margin-top:8px;padding:8px 10px;background:#F8FAFC;border-radius:8px">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<span style="font-weight:600">' + UI.escapeHtml(App.periodLabel(pick.periodId)) + ' — القاعة:</span>' +
+        '<select class="input cf-hall-select" data-cf-hall-date="' + pick.date + '" data-cf-hall-period="' + UI.escapeHtml(pick.periodId) + '" style="flex:1;min-width:140px">' +
+        calHallSelectOptions(pick) + '</select></div>' +
+        calHallNoteHtml(pick) +
+        '</div>';
+    }
+
+    function calDayRowHtml(date, periods, holidays, today) {
+      var d = UI.parseDateStr(date);
+      var label = UI.WEEKDAYS[d.getDay()] + ' ' + UI.fmtDateShort(date);
+      var isHoliday = !!holidays[date];
+      var html = '<div class="cf-day" data-cf-date="' + date + '" style="border:1px solid #E2E8F0;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff' +
+        (isHoliday ? ';opacity:0.75' : '') + '">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+        '<strong>' + UI.escapeHtml(label) + '</strong>';
+      if (date === today) html += '<span class="pill pill-navy">اليوم</span>';
+      if (isHoliday) html += '<span class="pill pill-amber">عطلة: ' + UI.escapeHtml(holidays[date]) + '</span>';
+      html += '</div>';
+      if (isHoliday) {
+        // جلسات حالية في يوم عطلة (وُجدت قبل تسجيل العطلة): تُعرض
+        // قاعاتها فقط — بلا شرائح لإضافة جلسات جديدة.
+        var holidayPicks = periods.filter(function (p) { return calPicks[date + '|' + p.id]; });
+        html += '<div class="muted">' + (holidayPicks.length ?
+          'يوم عطلة — لا يمكن إضافة جلسات جديدة؛ الجلسات الحالية معروضة أدناه.' :
+          'لا جلسات في أيام العطل.') + '</div>';
+        if (holidayPicks.length) {
+          html += '<div class="cf-day-halls">';
+          holidayPicks.forEach(function (p) { html += calHallRowHtml(calPicks[date + '|' + p.id]); });
+          html += '</div>';
         }
-        if (isPeriod) dayPlanState[d].periodId = t.value;
-        else dayPlanState[d].hallId = t.value || null;
+      } else if (!periods.length) {
+        html += '<div class="muted">لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة أولاً.</div>';
+      } else {
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+        periods.forEach(function (p) {
+          var key = date + '|' + p.id;
+          html += '<button type="button" class="chip cf-period-chip' + (calPicks[key] ? ' active' : '') +
+            '" data-cf-chip-date="' + date + '" data-cf-chip-period="' + UI.escapeHtml(p.id) + '">' +
+            UI.escapeHtml(p.label) + ' <span class="ltr">' + UI.escapeHtml(fmtRange12(p.start, p.end)) + '</span></button>';
+        });
+        html += '</div><div class="cf-day-halls">';
+        periods.forEach(function (p) {
+          var key = date + '|' + p.id;
+          if (calPicks[key]) html += calHallRowHtml(calPicks[key]);
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function renderCalendar(resetSpan) {
+      var calEl = card.querySelector('#cf-calendar');
+      if (!calEl) return;
+      calOccupied = buildHallOccupancy(isEdit ? course.id : null);
+      var periods = sortedPeriods();
+      if (resetSpan) calWeeksShown = calComputeWeeks();
+      var startDate = calStartDateVal();
+      var picks = calPicksList();
+      // النطاق يغطي الاختيارات دائماً (حتى بعد تغيير تاريخ البدء).
+      var rangeStart = startDate;
+      var rangeEnd = calAddDays(startDate, calWeeksShown * 7 - 1);
+      picks.forEach(function (p) {
+        if (p.date < rangeStart) rangeStart = p.date;
+        if (p.date > rangeEnd) rangeEnd = p.date;
+      });
+      var holidays = {};
+      App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = h.name; });
+      var today = UI.todayStr();
+      var totalDays = Math.round((UI.parseDateStr(rangeEnd).getTime() - UI.parseDateStr(rangeStart).getTime()) / 86400000) + 1;
+      var weeksCount = Math.ceil(totalDays / 7);
+      var html = '';
+      for (var w = 0; w < weeksCount; w++) {
+        var weekStart = calAddDays(rangeStart, w * 7);
+        var weekEnd = calAddDays(rangeStart, Math.min(w * 7 + 6, totalDays - 1));
+        html += '<div class="cf-week" data-cf-week="' + w + '" style="margin-bottom:16px">' +
+          '<div class="cf-week-title" style="font-weight:700;margin-bottom:8px">الأسبوع ' + (w + 1) + ' · ' +
+          UI.escapeHtml(UI.fmtDateShort(weekStart) + ' – ' + UI.fmtDate(weekEnd)) + '</div>';
+        for (var i = 0; i < 7; i++) {
+          var dayIndex = w * 7 + i;
+          if (dayIndex >= totalDays) break;
+          html += calDayRowHtml(calAddDays(rangeStart, dayIndex), periods, holidays, today);
+        }
+        html += '</div>';
+      }
+      calEl.innerHTML = html;
+      var moreBtn = card.querySelector('#cf-cal-more');
+      if (moreBtn) moreBtn.hidden = calWeeksShown >= 52;
+      calRefreshSummary();
+    }
+
+    // العداد + تحذيرات التعارض + حظر زر الحفظ أثناء التعارض أو
+    // تجاوز العدد المطلوب عند الإنشاء فقط (عند التعديل لا يُحظر
+    // الحفظ بتجاوز العدد — الجلسات الحالية قد تتجاوزه أصلاً؛ ولا
+    // يُحظر عند صفر اختيارات — فحص الإرسال يتولاه برسالة خطأ واضحة).
+    function calRefreshSummary() {
+      var summaryEl = card.querySelector('#cf-cal-summary');
+      var warnEl = card.querySelector('#cf-cal-warnings');
+      var picks = calPicksList();
+      var sc = calSessionCountVal();
+      // سقف العدد يُحظر عند الإنشاء فقط؛ عند التعديل قد تتجاوز
+      // الجلسات الحالية العدد (تقسيم/إضافة يدوية) فلا يُحظر الحفظ
+      // (كما في submitCourseForm) — العداد يبقى معلومة فقط.
+      var over = !isEdit && sc > 0 && picks.length > sc;
+      // اختيارات بلا شريحة ولا صف قاعة في الرزنامة (فترات حُذفت
+      // بعد إنشاء الجلسة): تُذكر في العداد حتى لا تكون صامتة.
+      var invisible = 0;
+      var calElForCount = card.querySelector('#cf-calendar');
+      if (calElForCount) {
+        picks.forEach(function (p) {
+          var chip = calElForCount.querySelector('[data-cf-chip-date="' + p.date + '"][data-cf-chip-period="' + p.periodId + '"]');
+          var hallRow = calElForCount.querySelector('[data-cf-hallrow="' + p.date + '|' + p.periodId + '"]');
+          if (!chip && !hallRow) invisible++;
+        });
+      }
+      if (summaryEl) {
+        summaryEl.textContent = 'تم اختيار ' + picks.length + ' جلسة' + (sc > 0 ? ' من ' + sc + ' مطلوبة' : '') +
+          (invisible ? ' (منها ' + invisible + ' جلسة بفترات محذوفة غير معروضة)' : '');
+        summaryEl.style.color = over ? '#B91C1C' : '';
+      }
+      var conflicts = calPickConflicts(picks, isEdit ? course.id : null);
+      var blocked = conflicts.length > 0 || over;
+      if (warnEl) {
+        var warnHtml = '';
+        if (conflicts.length) {
+          warnHtml += '<div style="background:#FEF2F2;color:#B91C1C;border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:10px;font-weight:600">' +
+            UI.escapeHtml(HALL_CONFLICT_WARNING + ' — غيّر القاعة أو ألغِ اختيار الجلسة قبل الحفظ.') + '</div>';
+        }
+        if (over) {
+          warnHtml += '<div style="background:#FEF2F2;color:#B91C1C;border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:10px;font-weight:600">' +
+            UI.escapeHtml('اخترت ' + picks.length + ' جلسة بينما عدد الجلسات المطلوب ' + sc + ' — قلّل الاختيار أو زد عدد الجلسات.') + '</div>';
+        }
+        warnEl.innerHTML = warnHtml;
+        warnEl.hidden = !warnHtml;
+      }
+      var submitBtn = card.querySelector('.modal-actions .btn');
+      // لا يُمس زر الإرسال أثناء التحميل (فيه مؤشر دوّار) — وإلا
+      // أعادت نقرة شريحة أثناء الإرسال تفعيله قبل انتهاء الحفظ.
+      if (submitBtn && !submitBtn.querySelector('.spinner')) submitBtn.disabled = blocked;
+    }
+
+    // إعادة رسم مؤجلة قليلاً بعد تغيير عدد الجلسات أو تاريخ البدء
+    // أو الأيام المفضلة: حدث 'change' قد ينطلق من فقدان التركيز
+    // أثناء نقرة على شريحة في الرزنامة — وإعادة الرسم الفورية
+    // تستبدل الشريحة تحت المؤشر قبل اكتمال النقرة فتضيع النقرة.
+    var calRerenderTimer = null;
+    function scheduleCalRerender() {
+      if (calRerenderTimer) clearTimeout(calRerenderTimer);
+      calRerenderTimer = setTimeout(function () {
+        calRerenderTimer = null;
+        renderCalendar(true);
+      }, 250);
+    }
+
+    var calEl = card.querySelector('#cf-calendar');
+    if (calEl) {
+      // النقر على شريحة فترة يبدّل اختيارها جلسةً.
+      calEl.addEventListener('click', function (e) {
+        var chip = e.target && e.target.closest ? e.target.closest('[data-cf-chip-date]') : null;
+        if (!chip || !calEl.contains(chip)) return;
+        var date = chip.getAttribute('data-cf-chip-date');
+        var periodId = chip.getAttribute('data-cf-chip-period');
+        var key = date + '|' + periodId;
+        if (calPicks[key]) {
+          delete calPicks[key];
+          chip.classList.remove('active');
+          var row = calEl.querySelector('[data-cf-hallrow="' + key + '"]');
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+        } else {
+          var defHallSel = card.querySelector('#cf-cal-defaulthall');
+          var defHall = (defHallSel && defHallSel.value && defHallSel.value !== '__new__') ? defHallSel.value : null;
+          calPicks[key] = { date: date, periodId: periodId, hallId: defHall };
+          chip.classList.add('active');
+          var dayHalls = calEl.querySelector('[data-cf-date="' + date + '"] .cf-day-halls');
+          if (dayHalls) dayHalls.insertAdjacentHTML('beforeend', calHallRowHtml(calPicks[key]));
+        }
+        calRefreshSummary();
+      });
+      // تغيير قاعة جلسة مختارة (مع الإضافة السريعة للقاعة عند فراغ القائمة).
+      calEl.addEventListener('change', function (e) {
+        var sel = e.target && e.target.closest ? e.target.closest('[data-cf-hall-date]') : null;
+        if (!sel || !calEl.contains(sel)) return;
+        var date = sel.getAttribute('data-cf-hall-date');
+        var periodId = sel.getAttribute('data-cf-hall-period');
+        var key = date + '|' + periodId;
+        if (!calPicks[key]) return;
+        if (sel.value === '__new__') {
+          sel.value = calPicks[key].hallId || '';
+          openQuickAddModal('hall', function (newId) {
+            if (calPicks[key]) calPicks[key].hallId = newId;
+            refreshDirectorySelects();
+          });
+          return;
+        }
+        calPicks[key].hallId = sel.value || null;
+        // تحديث ملاحظة الصف وحدها (دون إعادة بنائه — للحفاظ على التركيز).
+        var hallRow = calEl.querySelector('[data-cf-hallrow="' + key + '"]');
+        if (hallRow) {
+          hallRow.querySelectorAll('.cf-hall-warning, .cf-nohall-note').forEach(function (n) {
+            if (n.parentNode) n.parentNode.removeChild(n);
+          });
+          var note = calHallNoteHtml(calPicks[key]);
+          if (note) hallRow.insertAdjacentHTML('beforeend', note);
+        }
+        calRefreshSummary();
       });
     }
-    card.querySelectorAll('.day-chip input').forEach(function (cb) {
-      cb.addEventListener('change', renderDayPlan);
+    var defaultHallSel = card.querySelector('#cf-cal-defaulthall');
+    if (defaultHallSel) {
+      defaultHallSel.addEventListener('change', function () {
+        if (defaultHallSel.value !== '__new__') return; // تنطبق على الاختيارات الجديدة فقط
+        defaultHallSel.value = '';
+        openQuickAddModal('hall', function (newId) {
+          refreshDirectorySelects();
+          var dh = card.querySelector('#cf-cal-defaulthall');
+          if (dh) dh.value = newId;
+        });
+      });
+    }
+    var calMoreBtn = card.querySelector('#cf-cal-more');
+    if (calMoreBtn) calMoreBtn.addEventListener('click', function () {
+      calWeeksShown = Math.min(52, calWeeksShown + 4);
+      renderCalendar(false);
     });
-    if (mainPeriodSel) {
-      mainPeriodSel.addEventListener('change', function () {
-        Object.keys(dayPlanState).forEach(function (k) { dayPlanState[k].periodId = mainPeriodSel.value; });
-        renderDayPlan();
-      });
+    var sessionCountInput = card.querySelector('[name="sessionCount"]');
+    if (sessionCountInput) {
+      sessionCountInput.addEventListener('input', calRefreshSummary);
+      sessionCountInput.addEventListener('change', scheduleCalRerender);
     }
-    renderDayPlan();
+    var startDateInput = card.querySelector('[name="startDate"]');
+    if (startDateInput) startDateInput.addEventListener('change', scheduleCalRerender);
+    card.querySelectorAll('.day-chip input').forEach(function (cb) {
+      cb.addEventListener('change', scheduleCalRerender);
+    });
+    renderCalendar(true);
   }
 
-  function submitCourseForm(form, close, submitBtn, course, isEdit) {
+  // calPicks: الجلسات المختارة في الرزنامة [{date, periodId, hallId}]
+  // مرتبة زمنياً (تُمرَّر من openCourseForm). عند الإنشاء تُنشأ
+  // جلسات الدورة منها مباشرة؛ عند التعديل تُشتق منها أيام الدورة
+  // وفترتها وخطتها الأسبوعية فقط — الجلسات الحالية لا تتغير.
+  function submitCourseForm(form, close, submitBtn, course, isEdit, calPicks) {
     var name = form.querySelector('[name="name"]').value.trim();
     var code = form.querySelector('[name="code"]').value.trim();
-    var periodId = form.querySelector('[name="periodId"]').value;
     var sessionCount = parseInt(form.querySelector('[name="sessionCount"]').value, 10);
     var budget = parseInt(form.querySelector('[name="budget"]').value, 10) || 0;
     var startDateRaw = form.querySelector('[name="startDate"]').value;
@@ -601,18 +1442,11 @@
     var directorateIds = [];
     form.querySelectorAll('[data-dir-id]:checked').forEach(function (cb) { directorateIds.push(cb.getAttribute('data-dir-id')); });
 
-    // الخطة الأسبوعية (v1.1): فترة وقاعة لكل يوم؛ القاعة الفارغة تعني
-    // «تلقائي» (أول قاعة حرة)، والفترة الفارغة تعني الفترة الرئيسية.
-    // تُسجَّل دائماً (حتى الافتراضيات) ليكون التوليد صريحاً.
-    var dayPlan = {};
-    form.querySelectorAll('[data-dayplan-period]').forEach(function (sel) {
-      var d = sel.getAttribute('data-dayplan-period');
-      var hallSel = form.querySelector('[data-dayplan-hall="' + d + '"]');
-      dayPlan[d] = {
-        periodId: sel.value || periodId,
-        hallId: hallSel && hallSel.value ? hallSel.value : null
-      };
-    });
+    // نمط الدورة (v2.1): يُشتق من جلسات الرزنامة المختارة + الأيام
+    // المفضلة، فيبقى سجل الدورة متوافقاً مع توليد الجدول وإعادة
+    // التوليد وعرض التفاصيل دون أي حقل جديد.
+    var picks = sortPicks(calPicks || []);
+    var pattern = deriveCoursePattern(picks, days, isEdit ? { periodId: course.periodId, dayPlan: course.dayPlan } : null);
 
     if (!name) { UI.formError(form, 'اسم الدورة مطلوب'); return; }
     if (!code) { UI.formError(form, 'المعرّف مطلوب'); return; }
@@ -620,9 +1454,25 @@
       UI.formError(form, 'هذا المعرّف مستخدم من قبل — اختر معرّفاً آخر');
       return;
     }
-    if (!periodId) { UI.formError(form, 'اختر الفترة التدريبية'); return; }
     if (!sessionCount || sessionCount < 1) { UI.formError(form, 'عدد الجلسات غير صالح'); return; }
-    if (!days.length) { UI.formError(form, 'اختر يوماً واحداً على الأقل من أيام الأسبوع'); return; }
+    if (!isEdit && !picks.length) { UI.formError(form, 'اختر جلسة واحدة على الأقل من الرزنامة'); return; }
+    // سقف العدد المطلوب عند الإنشاء فقط (كما في المولّد)؛ عند التعديل
+    // قد تتجاوز الجلسات الحالية العدد (تقسيم/إضافة) فلا يُحظر الحفظ.
+    if (!isEdit && picks.length > sessionCount) {
+      UI.formError(form, 'اخترت ' + picks.length + ' جلسة بينما عدد الجلسات المطلوب ' + sessionCount + ' — قلّل الاختيار أو زد عدد الجلسات');
+      return;
+    }
+    if (!pattern.days.length) { UI.formError(form, 'اختر يوماً واحداً على الأقل من أيام الأسبوع أو جلسة من الرزنامة'); return; }
+    if (!pattern.periodId) { UI.formError(form, 'اختر جلسة واحدة على الأقل من الرزنامة'); return; }
+    // فحص أخير لتعارض القاعات (قد تُحجز قاعة أثناء فتح النموذج):
+    // يمنع الحفظ برسالة التحذير نفسها المعروضة في الرزنامة.
+    var conflicts = calPickConflicts(picks, isEdit ? course.id : null);
+    if (conflicts.length) {
+      var c0 = conflicts[0];
+      UI.formError(form, HALL_CONFLICT_WARNING + ' (' + (App.hallName(c0.hallId) || '') + '، ' +
+        UI.fmtDateFull(c0.date) + '، ' + App.periodLabel(c0.periodId) + ')');
+      return;
+    }
 
     var newTraineeName = form.querySelector('[name="newTraineeName"]').value.trim();
     var newTrainerName = trainerSel === '__new__' ? form.querySelector('[name="newTrainerName"]').value.trim() : '';
@@ -654,8 +1504,7 @@
           code: App.nextCode('trainees'),
           directorateId: form.querySelector('[name="newTraineeDirectorate"]').value || null,
           phone: form.querySelector('[name="newTraineePhone"]').value.trim(),
-          notes: form.querySelector('[name="newTraineeNotes"]').value.trim(),
-          status: null
+          notes: form.querySelector('[name="newTraineeNotes"]').value.trim()
         }).then(function (id) { traineeIds.push(id); return ctx; });
       });
     }
@@ -670,9 +1519,9 @@
         directorateId: directorateId,
         traineeIds: traineeIds,
         directorateIds: directorateIds,
-        days: days,
-        dayPlan: dayPlan,
-        periodId: periodId,
+        days: pattern.days,
+        dayPlan: pattern.dayPlan,
+        periodId: pattern.periodId,
         sessionCount: sessionCount,
         budget: budget,
         startDate: startDate || null
@@ -714,9 +1563,9 @@
         UI.toast('تم حفظ تعديلات الدورة', 'success');
         return App.refresh();
       }
-      // توليد الجدول للدورة الجديدة
-      var weeks = parseInt(form.querySelector('[name="weeks"]').value, 10) || 2;
-      return window.TadreebDB.generateSchedule(res.courseId, weeks, startDate).then(function (result) {
+      // إنشاء جلسات الدورة الجديدة من اختيارات الرزنامة (v2.1) —
+      // سجلات مطابقة لما ينتجه توليد الجدول، وتُعرض نافذة النتيجة نفسها.
+      return createPickedSessions(res.courseId, picks).then(function (result) {
         UI.setBtnLoading(submitBtn, false);
         close();
         UI.toast('تم إنشاء الدورة وتوليد الجدول', 'success');
@@ -918,6 +1767,8 @@
       '<span class="muted">' + prog.done + ' جلسات مكتملة من ' + prog.total + ' · المتبقي ' + prog.remaining + ' جلسة</span></div>' +
       '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
 
+    html += '<div id="course-stats-panel"></div>';
+
     // جدول الجلسات
     html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">جدول الجلسات</h2><div class="head-actions">';
     if (canWrite) {
@@ -931,31 +1782,28 @@
     if (!sessions.length) {
       html += UI.emptyState('لا جلسات بعد', 'ولّد الجدول أو أضف جلسة يدوياً.', canWrite ? 'توليد الجدول' : null, 'cd-empty-generate');
     } else {
-      html += '<div class="table-wrap"><table><thead><tr><th>الجلسة</th><th>التاريخ</th><th>اليوم</th><th>الوقت</th><th>القاعة</th><th>الحالة</th><th>ملاحظة</th>' +
-        (canWrite ? '<th>إجراءات</th>' : '') + '</tr></thead><tbody>';
       sessions.forEach(function (s, i) {
         var sp = Store.get('periods', s.periodId);
         var isSel = selectedSession && selectedSession.id === s.id;
-        html += '<tr class="clickable' + (isSel ? ' selected-row' : '') + (detailState.mergeFromId === s.id ? ' merge-pick' : '') +
-          '" data-session-row="' + UI.escapeHtml(s.id) + '"><td><strong>' + UI.escapeHtml(App.sessionLabel(s, course)) + '</strong></td>' +
-          '<td>' + UI.escapeHtml(UI.fmtDateShort(s.date)) + '</td>' +
-          '<td>' + UI.escapeHtml(UI.fmtWeekday(s.date)) + '</td>' +
-          '<td>' + (sp ? UI.fmtTimeRange(sp.start, sp.end) : '') + '</td>' +
-          '<td>' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') + '</td>' +
-          '<td>' + UI.pillForSessionState(s.state) + '</td>' +
-          '<td>' + UI.escapeHtml(s.note || '') + '</td>';
+        var sessMeta2 = 'القاعة: ' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة');
+        if (s.note) sessMeta2 += ' · ملاحظة: ' + UI.escapeHtml(s.note);
+        html += '<div class="list-row clickable' + (isSel ? ' selected-row' : '') + (detailState.mergeFromId === s.id ? ' merge-pick' : '') +
+          '" data-session-row="' + UI.escapeHtml(s.id) + '">' +
+          '<div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(App.sessionLabel(s, course)) + '</strong> ' + UI.pillForSessionState(s.state) + '</div>' +
+          '<div class="list-row-meta muted">' + UI.escapeHtml(UI.fmtDateShort(s.date)) + ' · ' + UI.escapeHtml(UI.fmtWeekday(s.date)) +
+          (sp ? ' · <span class="ltr">' + UI.fmtTimeRange(sp.start, sp.end) + '</span>' : '') + '</div>' +
+          '<div class="list-row-meta muted">' + sessMeta2 + '</div>' +
+          '</div>';
         if (canWrite) {
-          html += '<td><div class="row-actions">' +
-            '<button class="link-btn" type="button" data-sess-state="' + UI.escapeHtml(s.id) + '">الحالة</button>' +
-            '<button class="link-btn" type="button" data-sess-hall="' + UI.escapeHtml(s.id) + '">القاعة</button>' +
-            '<button class="link-btn" type="button" data-sess-note="' + UI.escapeHtml(s.id) + '">ملاحظة</button>' +
-            '<button class="link-btn" type="button" data-sess-merge="' + UI.escapeHtml(s.id) + '">دمج</button>' +
-            '<button class="link-btn danger" type="button" data-sess-del="' + UI.escapeHtml(s.id) + '">حذف</button>' +
-            '</div></td>';
+          html += '<div class="list-row-actions row-actions">' +
+            '<button class="btn btn-outline btn-sm" type="button" data-sess-state="' + UI.escapeHtml(s.id) + '">الحالة</button>' +
+            '<button class="btn btn-danger btn-sm" type="button" data-sess-del="' + UI.escapeHtml(s.id) + '">حذف</button>' +
+            '<button class="btn btn-outline btn-sm" type="button" data-sess-options="' + UI.escapeHtml(s.id) + '">خيارات</button>' +
+            '</div>';
         }
-        html += '</tr>';
+        html += '</div>';
       });
-      html += '</tbody></table></div>';
       html += '<div class="muted" style="margin-top:10px">انقر على أي جلسة لعرض حضورها وتسجيله — يمكن تسجيل الحضور وتصحيحه لأي جلسة، سابقة أو قادمة.</div>';
     }
     html += '</div>';
@@ -979,30 +1827,23 @@
         'لا متدربين في هذه الدورة بعد — أضف أعضاء إلى المجموعة من الدليل.' :
         'لا متدربين في هذه الدورة بعد — أضفهم من تعديل الدورة.') + '</div>';
     } else {
-      html += '<div class="table-wrap"><table><thead><tr><th>المتدرب</th><th>المديرية</th><th>رقم الهاتف</th><th>الحالة</th><th>ملاحظات</th>' +
-        (canWrite ? '<th>إجراءات</th>' : '') + '</tr></thead><tbody>';
       trainees.forEach(function (t) {
-        html += '<tr><td>' + UI.escapeHtml(t.name) + '</td>' +
-          '<td>' + UI.escapeHtml(App.directorateName(t.directorateId) || '—') + '</td>' +
-          '<td><span class="ltr">' + UI.escapeHtml(t.phone || '—') + '</span></td>' +
-          '<td>' + (canWrite ?
-            '<select class="input" data-trainee-status="' + UI.escapeHtml(t.id) + '">' +
-            '<option value="">بلا حالة</option>' +
-            Object.keys(UI.TRAINEE_STATUS_LABELS).map(function (k) {
-              return '<option value="' + k + '"' + (t.status === k ? ' selected' : '') + '>' + UI.TRAINEE_STATUS_LABELS[k] + '</option>';
-            }).join('') + '</select>' : UI.pillForTraineeStatus(t.status)) + '</td>' +
-          '<td>' + UI.escapeHtml(t.notes || '') + '</td>';
+        html += '<div class="list-row">' +
+          '<div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(t.name) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(t, 'trainees')) + '</span></div>' +
+          '<div class="list-row-meta muted">' + UI.escapeHtml(App.directorateName(t.directorateId) || 'بلا مديرية') + ' · <span class="ltr">' + UI.escapeHtml(t.phone || '—') + '</span></div>';
+        if (t.notes) html += '<div class="list-row-meta muted">ملاحظات: ' + UI.escapeHtml(t.notes) + '</div>';
+        html += '</div>';
         if (canWrite) {
           // الدورة المجمّعة: أعضاؤها يُدارون من المجموعة، لا من هنا.
-          html += '<td><div class="row-actions">' +
-            '<button class="link-btn" type="button" data-trainee-notes="' + UI.escapeHtml(t.id) + '">ملاحظات</button>' +
+          html += '<div class="list-row-actions row-actions">' +
+            '<button class="btn btn-outline btn-sm" type="button" data-trainee-notes="' + UI.escapeHtml(t.id) + '">ملاحظات</button>' +
             (detailGrouped ? '' :
-              '<button class="link-btn danger" type="button" data-trainee-remove="' + UI.escapeHtml(t.id) + '">إزالة من الدورة</button>') +
-            '</div></td>';
+              '<button class="btn btn-danger btn-sm" type="button" data-trainee-remove="' + UI.escapeHtml(t.id) + '">إزالة من الدورة</button>') +
+            '</div>';
         }
-        html += '</tr>';
+        html += '</div>';
       });
-      html += '</tbody></table></div>';
     }
     html += '</div>';
 
@@ -1018,26 +1859,34 @@
       '<div class="meta-box"><div class="k">الميزانية المعتمدة</div><div class="v">' + UI.fmtMoney(budget.allocated) + '</div></div>' +
       '<div class="meta-box"><div class="k">إجمالي المصاريف</div><div class="v">' + UI.fmtMoney(budget.totalSpent) + '</div></div>' +
       '<div class="meta-box"><div class="k">المتبقي</div><div class="v">' + UI.fmtMoney(budget.remaining) + '</div></div>' +
-      '</div>' +
-      '<div class="table-wrap"><table><thead><tr><th>الفئة</th><th>المصروف</th></tr></thead><tbody>';
+      '</div>';
     var cats = Object.keys(budget.byCategory);
     if (!cats.length && !budget.trainerFeeDue) {
-      html += '<tr><td colspan="2" class="muted">لا مصاريف مسجلة بعد.</td></tr>';
+      html += '<div class="muted">لا مصاريف مسجلة بعد.</div>';
     } else {
       cats.forEach(function (cat) {
-        html += '<tr><td>' + UI.escapeHtml(cat) + '</td><td>' + UI.fmtMoney(budget.byCategory[cat]) + '</td></tr>';
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(cat) + '</strong></div>' +
+          '<div class="list-row-meta muted">' + UI.fmtMoney(budget.byCategory[cat]) + '</div></div></div>';
       });
       if (budget.trainerFeeDue > 0) {
-        html += '<tr><td>أجور المدربين <span class="muted">(مستحقة — غير مسجلة كمصروف بعد)</span></td><td>' + UI.fmtMoney(budget.trainerFeeDue) + '</td></tr>';
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>أجور المدربين</strong></div>' +
+          '<div class="list-row-meta muted">مستحقة — غير مسجلة كمصروف بعد · ' + UI.fmtMoney(budget.trainerFeeDue) + '</div></div></div>';
       }
-      html += '<tr><td><strong>إجمالي المصاريف</strong></td><td><strong>' + UI.fmtMoney(budget.totalSpent) + '</strong></td></tr>';
+      html += '<div class="list-row"><div class="list-row-main">' +
+        '<div class="list-row-title"><strong>إجمالي المصاريف</strong></div>' +
+        '<div class="list-row-meta muted">' + UI.fmtMoney(budget.totalSpent) + '</div></div></div>';
       if (budget.trainerFeeDue > 0) {
-        html += '<tr><td><strong>الإجمالي مع أجور المدربين المستحقة</strong></td><td><strong>' + UI.fmtMoney(budget.totalWithFees) + '</strong></td></tr>' +
-          '<tr><td><strong>المتبقي مع الأجور المستحقة</strong></td><td><strong>' + UI.fmtMoney(budget.remainingWithFees) + '</strong></td></tr>';
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>الإجمالي مع أجور المدربين المستحقة</strong></div>' +
+          '<div class="list-row-meta muted">' + UI.fmtMoney(budget.totalWithFees) + '</div></div></div>' +
+          '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>المتبقي مع الأجور المستحقة</strong></div>' +
+          '<div class="list-row-meta muted">' + UI.fmtMoney(budget.remainingWithFees) + '</div></div></div>';
       }
     }
-    html += '</tbody></table></div>' +
-      '<div style="margin-top:14px"><div class="section-title-row"><span>تم صرف ' + spentPct + '% من الميزانية</span>' +
+    html += '<div style="margin-top:14px"><div class="section-title-row"><span>تم صرف ' + spentPct + '% من الميزانية</span>' +
       '<span class="muted">المتبقي: ' + UI.fmtMoney(budget.remaining) + '</span></div>' +
       '<div class="progress"><i style="width:' + spentPct + '%"></i></div></div>';
 
@@ -1046,28 +1895,51 @@
     if (!budget.expenses.length) {
       html += '<div class="muted">لا بنود مصاريف بعد.</div>';
     } else {
-      html += '<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>الفئة</th><th>البيان</th><th>المبلغ</th>' +
-        (canWrite ? '<th>إجراءات</th>' : '') + '</tr></thead><tbody>';
       budget.expenses.forEach(function (e) {
-        html += '<tr><td>' + UI.escapeHtml(UI.fmtDate(e.date)) + '</td><td>' + UI.escapeHtml(e.category) + '</td>' +
-          '<td>' + UI.escapeHtml(e.description || '') + '</td><td>' + UI.fmtMoney(e.amount) + '</td>';
+        var expTitle = e.description || e.category;
+        var expMeta = UI.escapeHtml(UI.fmtDate(e.date)) + (e.description ? ' · ' + UI.escapeHtml(e.category) : '') +
+          ' · ' + UI.fmtMoney(e.amount);
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(expTitle) + '</strong></div>' +
+          '<div class="list-row-meta muted">' + expMeta + '</div></div>';
         if (canWrite) {
-          html += '<td><div class="row-actions">' +
-            '<button class="link-btn" type="button" data-exp-edit="' + UI.escapeHtml(e.id) + '">تعديل</button>' +
-            '<button class="link-btn" type="button" data-exp-notes="' + UI.escapeHtml(e.id) + '">ملاحظات</button>' +
-            '<button class="link-btn danger" type="button" data-exp-del="' + UI.escapeHtml(e.id) + '">حذف</button>' +
-            '</div></td>';
+          html += '<div class="list-row-actions row-actions">' +
+            '<button class="btn btn-outline btn-sm" type="button" data-exp-edit="' + UI.escapeHtml(e.id) + '">تعديل</button>' +
+            '<button class="btn btn-outline btn-sm" type="button" data-exp-notes="' + UI.escapeHtml(e.id) + '">ملاحظات</button>' +
+            '<button class="btn btn-danger btn-sm" type="button" data-exp-del="' + UI.escapeHtml(e.id) + '">حذف</button>' +
+            '</div>';
         }
-        html += '</tr>';
+        html += '</div>';
       });
-      html += '</tbody></table></div>';
     }
     if (canWrite) {
       html += '<div style="margin-top:18px"><button class="btn btn-outline btn-sm" type="button" id="cd-add-expense-btn">إضافة مصروف</button></div>';
     }
     html += '</div>';
 
+    html += '<div id="budget-stats-panel"></div>';
+
     container.innerHTML = html;
+
+    // لوحتا إحصاءات الدورة والميزانية (v2.1، بند 10).
+    if (window.TadreebStats) {
+      var coursePanelEl = container.querySelector('#course-stats-panel');
+      var courseRes = window.TadreebStats.computeCourse(courseId);
+      window.TadreebStats.renderPanel(coursePanelEl, {
+        section: 'course', title: 'إحصاءات الدورة', metrics: courseRes.metrics,
+        export: { label: 'تصدير ملف الدورة ↓', onClick: function () { openCourseFileExport(); } }
+      });
+      window.TadreebStats.courseAttendance(courseId).then(function (r) {
+        window.TadreebStats.updateMetrics(coursePanelEl, { attendanceRate: r.rate });
+      }).catch(function () { /* تبقى نسبة الحضور فارغة */ });
+
+      var budgetPanelEl = container.querySelector('#budget-stats-panel');
+      var budgetRes = window.TadreebStats.computeBudget(courseId);
+      window.TadreebStats.renderPanel(budgetPanelEl, {
+        section: 'budget', title: 'إحصاءات الميزانية', metrics: budgetRes.metrics,
+        export: { label: 'تصدير الميزانية ↓', onClick: function () { exportBudgetNow(); } }
+      });
+    }
 
     // ----- ربط الأحداث -----
     document.getElementById('cd-back').addEventListener('click', function (e) {
@@ -1091,6 +1963,17 @@
       App.refresh();
     });
 
+    // تفقد جلسة من ورقة الخيارات: تُحدَّد الجلسة ويُعاد رسم التفاصيل مع
+    // التمرير إلى بطاقة الحضور — مشتركة بين نقرة الصف وزر «خيارات».
+    function onSessionCheck(sid) {
+      detailState.selectedSessionId = sid;
+      App.renderScreen('course-detail', { courseId: courseId });
+      setTimeout(function () {
+        var card = document.getElementById('cd-attendance-card');
+        if (card) card.scrollIntoView();
+      }, 100);
+    }
+
     // صفوف الجلسات
     container.querySelectorAll('[data-session-row]').forEach(function (row) {
       row.addEventListener('click', function (e) {
@@ -1113,16 +1996,7 @@
           return;
         }
         if (window.SessionScreen && typeof window.SessionScreen.openActionSheet === 'function') {
-          window.SessionScreen.openActionSheet(id, {
-            onCheck: function (sid) {
-              detailState.selectedSessionId = sid;
-              App.renderScreen('course-detail', { courseId: courseId });
-              setTimeout(function () {
-                var card = document.getElementById('cd-attendance-card');
-                if (card) card.scrollIntoView();
-              }, 100);
-            }
-          });
+          window.SessionScreen.openActionSheet(id, { onCheck: onSessionCheck });
         } else {
           detailState.selectedSessionId = id;
           App.renderScreen('course-detail', { courseId: courseId });
@@ -1160,17 +2034,17 @@
           });
       });
     });
-
-    // المتدربون
-    container.querySelectorAll('[data-trainee-status]').forEach(function (sel) {
-      sel.addEventListener('change', function () {
-        var id = sel.getAttribute('data-trainee-status');
-        var status = sel.value || null;
-        window.TadreebDB.setTraineeStatus(id, status).then(function () {
-          UI.toast('تم تحديث حالة المتدرب', 'success');
-        }).catch(UI.toastError);
+    container.querySelectorAll('[data-sess-options]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var id = btn.getAttribute('data-sess-options');
+        if (window.SessionScreen && typeof window.SessionScreen.openActionSheet === 'function') {
+          window.SessionScreen.openActionSheet(id, { onCheck: onSessionCheck });
+        }
       });
     });
+
+    // المتدربون
     container.querySelectorAll('[data-trainee-notes]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var t = App.Store.get('trainees', btn.getAttribute('data-trainee-notes'));
@@ -1234,8 +2108,8 @@
       });
     });
 
-    // التصدير
-    document.getElementById('cd-export-btn').addEventListener('click', function () {
+    // التصدير — مشترك بين أزرار الترويسة وأزرار لوحتي الإحصاءات.
+    function openCourseFileExport() {
       UI.openPicker({
         title: 'تصدير ملف الدورة',
         sections: [
@@ -1252,10 +2126,12 @@
           }).catch(UI.toastError);
         }
       });
-    });
-    document.getElementById('cd-budget-export-btn').addEventListener('click', function () {
+    }
+    function exportBudgetNow() {
       UI.callExport('exportBudget', [App.buildBudgetData(courseId)]);
-    });
+    }
+    document.getElementById('cd-export-btn').addEventListener('click', openCourseFileExport);
+    document.getElementById('cd-budget-export-btn').addEventListener('click', exportBudgetNow);
     document.getElementById('cd-closing-btn').addEventListener('click', function () {
       UI.openPicker({
         title: 'تصدير التقرير الختامي',
@@ -1455,7 +2331,7 @@
       '<div class="field"><label>الفترة *</label><select name="periodId" required>' +
       periods.map(function (p) {
         return '<option value="' + UI.escapeHtml(p.id) + '"' + (p.id === course.periodId ? ' selected' : '') + '>' +
-          UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
+          UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(fmtRange12(p.start, p.end)) + ')</option>';
       }).join('') + '</select></div>' +
       '<div class="field field-full"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة (تُعيَّن لاحقاً)</option>' +
       App.Store.getAll('halls').map(function (h) {
@@ -1547,7 +2423,8 @@
     var modal = UI.openFormModal('تغيير قاعة الجلسة — ' + UI.fmtDateFull(s.date), fields, function (form, close, submitBtn) {
       var hallId = form.querySelector('[name="hallId"]').value || null;
       UI.setBtnLoading(submitBtn, true);
-      window.TadreebDB.update('sessions', sessionId, { hallId: hallId }).then(function () {
+      // عبر updateSession (لا update العام) ليفحص التعارض قبل الحفظ.
+      window.TadreebDB.updateSession(sessionId, { hallId: hallId }).then(function () {
         UI.setBtnLoading(submitBtn, false);
         close();
         UI.toast('تم تغيير قاعة الجلسة', 'success');

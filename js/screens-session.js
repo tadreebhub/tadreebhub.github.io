@@ -3,6 +3,17 @@
 (function () {
   'use strict';
 
+  // نطاق الفترة بنظام 12 ساعة («09:00 ص - 11:00 ص») عبر TadreebTime؛
+  // إن غابت الوحدة يُعرض النص الخام (بلا تعطّل أبداً).
+  function periodRange12(p) {
+    try {
+      if (window.TadreebTime && typeof window.TadreebTime.formatTimeRange12 === 'function') {
+        return window.TadreebTime.formatTimeRange12(p.start, p.end);
+      }
+    } catch (e) { /* احتياطي أدناه */ }
+    return (p.start || '') + ' - ' + (p.end || '');
+  }
+
   // ---------- مكوّن الحضور (يُستخدم داخل تفاصيل الدورة ونافذة الجلسة) ----------
   // opts: { embedded: true } — داخل بطاقة موجودة مسبقاً.
   function renderAttendanceBlock(container, sessionId, opts) {
@@ -36,6 +47,8 @@
         html += '<div class="att-note-box"><strong>ملاحظة الجلسة:</strong> ' + UI.escapeHtml(session.note) + '</div>';
       }
       html += '<div id="att-summary"></div>';
+      // لوحة إحصاءات الجلسة (v2.1 — بند 10): بطاقات حضور + تخصيص + تصدير.
+      html += '<div id="att-stats-panel"></div>';
 
       // حضور المدرب
       if (trainer) {
@@ -66,6 +79,9 @@
               '<button class="att-choice' + (status === 'present' ? ' sel-present' : '') + '" type="button" data-att="present">موجود</button>' +
               '<button class="att-choice' + (status === 'absent' ? ' sel-absent' : '') + '" type="button" data-att="absent">غائب</button>' +
               '<button class="att-choice' + (status === 'excused' ? ' sel-excused' : '') + '" type="button" data-att="excused">معتذر</button>' +
+              // مسح التسجيل (إعادة إلى «بلا تسجيل») — يظهر عند وجود
+              // تسجيل محفوظ أو اختيار محلي؛ يُحفظ مع زر «حفظ الحضور».
+              '<button class="link-btn" type="button" data-att-clear' + (status ? '' : ' hidden') + '>مسح التسجيل</button>' +
               '</div>' +
               '<div class="att-note-wrap"' + (status === 'excused' ? '' : ' hidden') + '>' +
               '<input type="text" class="att-note" data-att-note placeholder="مبرر الاعتذار (مطلوب عند الاعتذار)" value="' + UI.escapeHtml(rec.note || '') + '"></div>';
@@ -80,7 +96,7 @@
           html += '<div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">' +
             '<button class="btn" type="button" id="att-save-btn">حفظ الحضور</button>' +
             '<button class="btn btn-outline" type="button" id="att-all-present-btn">تحديد الكل موجوداً</button></div>' +
-            '<div class="muted" style="margin-top:8px">يمكن تسجيل الحضور وتصحيحه لأي جلسة — سابقة أو قادمة — وتُسجَّل كل التغييرات في سجل التدقيق.</div>';
+            '<div class="muted" style="margin-top:8px">يمكن تسجيل الحضور وتصحيحه لأي جلسة — سابقة أو قادمة — ومسح تسجيل خاطئ بزر «مسح التسجيل» بجانب المتدرب، وتُسجَّل كل التغييرات في سجل التدقيق.</div>';
         }
       }
 
@@ -93,6 +109,33 @@
       // ملخص الحضور: مجموعات بعددها (حاضرون / غائبون / معتذرون / بلا تسجيل)،
       // يُعاد حسابه من الحالة المحلية عند كل تغيير اختيار.
       var summaryEl = container.querySelector('#att-summary');
+      // لوحة إحصاءات الجلسة (v2.1 — بند 10): تُرسم مرة واحدة ثم تُحدَّث
+      // قيمها عند كل تغيير اختيار (بلا إعادة رسم كاملة حتى لا يضيع
+      // تخصيص المستخدم). تُتخطى بهدوء إن غابت وحدة الإحصاءات.
+      var statsPanelEl = container.querySelector('#att-stats-panel');
+      var statsRendered = false;
+      function updateStatsPanel(stateMap) {
+        if (!statsPanelEl || !window.TadreebStats) return;
+        var metrics = window.TadreebStats.computeSession(stateMap, trainees, session.trainerPresent).metrics;
+        if (!statsRendered) {
+          statsRendered = true;
+          window.TadreebStats.renderPanel(statsPanelEl, {
+            section: 'session',
+            title: 'إحصاءات الجلسة',
+            metrics: metrics,
+            export: {
+              label: 'تصدير الحضور ↓',
+              onClick: function () {
+                App.buildAttendanceData(sessionId).then(function (data) {
+                  UI.callExport('exportAttendance', [data]);
+                }).catch(UI.toastError);
+              }
+            }
+          });
+        } else {
+          window.TadreebStats.updateMetrics(statsPanelEl, metrics);
+        }
+      }
       function summaryHtml(stateMap) {
         var groups = { present: [], absent: [], excused: [], none: [] };
         trainees.forEach(function (t) {
@@ -127,6 +170,7 @@
       }
       function renderSummary(stateMap) {
         if (summaryEl) summaryEl.innerHTML = summaryHtml(stateMap);
+        updateStatsPanel(stateMap);
       }
 
       // ملاحظات الجلسة في الوضع المدمج فقط (النافذة الكاملة فيها مكوّن ملاحظات أصلاً).
@@ -152,6 +196,7 @@
         var traineeId = row.getAttribute('data-att-row');
         var noteWrap = row.querySelector('.att-note-wrap');
         var noteInput = row.querySelector('[data-att-note]');
+        var clearBtn = row.querySelector('[data-att-clear]');
         row.querySelectorAll('[data-att]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var status = btn.getAttribute('data-att');
@@ -161,9 +206,22 @@
             });
             btn.classList.add(status === 'present' ? 'sel-present' : status === 'absent' ? 'sel-absent' : 'sel-excused');
             if (noteWrap) noteWrap.hidden = status !== 'excused';
+            if (clearBtn) clearBtn.hidden = false;
             renderSummary(local);
           });
         });
+        if (clearBtn) {
+          clearBtn.addEventListener('click', function () {
+            local[traineeId] = { status: null, note: '' };
+            row.querySelectorAll('[data-att]').forEach(function (b) {
+              b.classList.remove('sel-present', 'sel-absent', 'sel-excused');
+            });
+            if (noteWrap) noteWrap.hidden = true;
+            if (noteInput) noteInput.value = '';
+            clearBtn.hidden = true;
+            renderSummary(local);
+          });
+        }
         if (noteInput) {
           noteInput.addEventListener('input', function () { local[traineeId].note = noteInput.value.trim(); renderSummary(local); });
         }
@@ -180,6 +238,8 @@
             });
             var wrap = row.querySelector('.att-note-wrap');
             if (wrap) wrap.hidden = true;
+            var cb = row.querySelector('[data-att-clear]');
+            if (cb) cb.hidden = false;
           });
           renderSummary(local);
         });
@@ -214,7 +274,17 @@
           trainees.forEach(function (t) {
             var rec = local[t.id];
             var old = attMap[t.id] || {};
-            if (!rec.status) return; // بلا اختيار — لا يُحفظ
+            if (!rec.status) {
+              // مسح تسجيل سابق (إعادة إلى «بلا تسجيل»)؛ بلا تسجيل
+              // قديم لا شيء يُحفظ.
+              if (old.status) {
+                changed++;
+                chain = chain.then(function () {
+                  return window.TadreebDB.clearAttendance(sessionId, t.id);
+                });
+              }
+              return;
+            }
             if (rec.status === old.status && rec.note === (old.note || '')) return; // بلا تغيير
             changed++;
             chain = chain.then(function () {
@@ -307,7 +377,7 @@
     });
     var hallBtn = modal.element.querySelector('#sess-hall-btn');
     if (hallBtn) hallBtn.addEventListener('click', function () {
-      UI.openFormModal('تغيير قاعة الجلسة',
+      var hm = UI.openFormModal('تغيير قاعة الجلسة',
         '<div class="field"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة</option>' +
         App.Store.getAll('halls').map(function (h) {
           return '<option value="' + UI.escapeHtml(h.id) + '"' + (session.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
@@ -315,7 +385,8 @@
         function (form, close2, btn2) {
           var hallId = form.querySelector('[name="hallId"]').value || null;
           UI.setBtnLoading(btn2, true);
-          window.TadreebDB.update('sessions', sessionId, { hallId: hallId }).then(function () {
+          // عبر updateSession (لا update العام) ليفحص التعارض قبل الحفظ.
+          window.TadreebDB.updateSession(sessionId, { hallId: hallId }).then(function () {
             UI.setBtnLoading(btn2, false);
             close2();
             UI.toast('تم تغيير قاعة الجلسة', 'success');
@@ -324,12 +395,19 @@
           }).catch(function (err) { UI.setBtnLoading(btn2, false); UI.toastError(err); });
         }, { submitLabel: 'حفظ', width: 'normal' });
       window.TadreebDB.checkHallAvailability(session.date, session.periodId).then(function (rows) {
-        var el = document.querySelector('#sess-hall-avail');
-        if (!el) return;
+        if (!hm.element || !hm.element.isConnected) return;
+        var el = hm.element.querySelector('#sess-hall-avail');
         var busy = rows.filter(function (r) { return !r.free && r.hallId !== session.hallId; });
-        el.textContent = busy.length ?
+        if (el) el.textContent = busy.length ?
           'مشغولة في هذا الموعد: ' + busy.map(function (r) { return r.hallName + ' (' + r.sessionCourse + ')'; }).join('، ') :
           'كل القاعات متاحة في هذا الموعد.';
+        // تعطيل القاعات المشغولة (قاعة الجلسة نفسها تبقى متاحة).
+        var sel = hm.element.querySelector('[name="hallId"]');
+        if (sel) sel.querySelectorAll('option[value]').forEach(function (opt) {
+          if (!opt.value) return;
+          var row = rows.find(function (r) { return r.hallId === opt.value; });
+          opt.disabled = !!(row && !row.free && row.hallId !== session.hallId);
+        });
       }).catch(function () {});
     });
     var noteBtn = modal.element.querySelector('#sess-note-btn');
@@ -518,7 +596,7 @@
     function periodOptionsHtml(selectedId) {
       return App.Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); }).map(function (p) {
         return '<option value="' + UI.escapeHtml(p.id) + '"' + (p.id === selectedId ? ' selected' : '') + '>' +
-          UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
+          UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(periodRange12(p)) + ')</option>';
       }).join('');
     }
 
@@ -604,7 +682,7 @@
           .filter(function (p) { return !excludeOriginal || p.id !== session.periodId; })
           .map(function (p) {
             return '<option value="' + UI.escapeHtml(p.id) + '">' +
-              UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
+              UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(periodRange12(p)) + ')</option>';
           }).join('');
       }
 
@@ -768,12 +846,13 @@
     }
 
     function doHall() {
-      UI.openFormModal('تغيير قاعة الجلسة',
+      var hm = UI.openFormModal('تغيير قاعة الجلسة',
         '<div class="field"><label>القاعة</label><select name="hallId">' + hallOptionsHtml(session.hallId) + '</select><div class="field-hint" id="sheet-hall-avail">جارٍ فحص توفر القاعات…</div></div>',
         function (form, close2, btn2) {
           var hallId = form.querySelector('[name="hallId"]').value || null;
           UI.setBtnLoading(btn2, true);
-          window.TadreebDB.update('sessions', sessionId, { hallId: hallId }).then(function () {
+          // عبر updateSession (لا update العام) ليفحص التعارض قبل الحفظ.
+          window.TadreebDB.updateSession(sessionId, { hallId: hallId }).then(function () {
             UI.setBtnLoading(btn2, false);
             close2();
             UI.toast('تم تغيير قاعة الجلسة', 'success');
@@ -781,12 +860,19 @@
           }).catch(function (err) { UI.setBtnLoading(btn2, false); UI.toastError(err); });
         }, { submitLabel: 'حفظ', width: 'normal' });
       window.TadreebDB.checkHallAvailability(session.date, session.periodId).then(function (rows) {
-        var el = document.querySelector('#sheet-hall-avail');
-        if (!el) return;
+        if (!hm.element || !hm.element.isConnected) return;
+        var el = hm.element.querySelector('#sheet-hall-avail');
         var busy = rows.filter(function (r) { return !r.free && r.hallId !== session.hallId; });
-        el.textContent = busy.length ?
+        if (el) el.textContent = busy.length ?
           'مشغولة في هذا الموعد: ' + busy.map(function (r) { return r.hallName + ' (' + r.sessionCourse + ')'; }).join('، ') :
           'كل القاعات متاحة في هذا الموعد.';
+        // تعطيل القاعات المشغولة (قاعة الجلسة نفسها تبقى متاحة).
+        var sel = hm.element.querySelector('[name="hallId"]');
+        if (sel) sel.querySelectorAll('option[value]').forEach(function (opt) {
+          if (!opt.value) return;
+          var row = rows.find(function (r) { return r.hallId === opt.value; });
+          opt.disabled = !!(row && !row.free && row.hallId !== session.hallId);
+        });
       }).catch(function () {});
     }
 

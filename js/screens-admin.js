@@ -8,6 +8,41 @@
 
   var auditLimit = 50;
 
+  // ---------- لوحات الإحصاءات (v2.1 — بند 10) ----------
+  // نمط موحد لكل لوحات هذا الملف: حساب المقاييس عبر TadreebStats ثم
+  // رسم اللوحة (وفيها زر «تخصيص» وزر تصدير يفتح منتقي الأعمدة ثم
+  // يستدعي دالة التصدير ببيانات جديدة). تُتخطى اللوحة بهدوء إن غابت
+  // وحدة الإحصاءات أو حاوية اللوحة.
+  // spec: {section, title, compute(), exportTitle, exportFn, exportKind,
+  // exportParams?, columns: [{id, label, checked}]}
+  function renderStatsPanel(container, panelId, spec) {
+    if (!container || !window.TadreebStats) return null;
+    var panelEl = container.querySelector('#' + panelId);
+    if (!panelEl) return null;
+    var res = spec.compute();
+    window.TadreebStats.renderPanel(panelEl, {
+      section: spec.section,
+      title: spec.title,
+      metrics: res.metrics,
+      export: {
+        label: 'تصدير الإحصاءات ↓',
+        onClick: function () {
+          UI.openPicker({
+            title: spec.exportTitle,
+            columns: spec.columns,
+            onConfirm: function (result) {
+              UI.callExport(spec.exportFn, [
+                window.TadreebStats.exportData(spec.exportKind, spec.exportParams || {}),
+                { columns: result.columns }
+              ]);
+            }
+          });
+        }
+      }
+    });
+    return panelEl;
+  }
+
   function render(container) {
     var html = '';
     html += '<div class="page-head"><div><h1>الإدارة</h1>' +
@@ -31,6 +66,9 @@
     html += '<div class="card-white"><div class="section-title-row"><h2>الحسابات</h2></div><div id="admin-users-box">' +
       UI.loadingState('جارٍ تحميل الحسابات…') + '</div></div>';
 
+    // لوحة إحصاءات المستخدمين (v2.1 — بند 10): تُرسم بعد تحميل القائمة.
+    html += '<div id="admin-users-stats-panel"></div>';
+
     // سجل التدقيق
     html += '<div class="card-white"><div class="section-title-row"><h2>سجل التدقيق</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="admin-audit-refresh">تحديث</button></div>' +
@@ -40,6 +78,9 @@
     html += '<div class="card-white"><div class="section-title-row"><h2>محاولات دخول فاشلة أخيرة</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="admin-attempts-refresh">تحديث</button></div>' +
       '<div id="admin-attempts-box">' + UI.loadingState('جارٍ تحميل محاولات الدخول…') + '</div></div>';
+
+    // لوحة إحصاءات المصاريف (v2.1 — بند 10): كل مصاريف المنصة.
+    html += '<div id="admin-expenses-stats-panel"></div>';
 
     // النسخ الاحتياطي
     html += '<div class="card-white"><div class="section-title-row"><h2>النسخ الاحتياطي والملخص</h2></div>' +
@@ -54,6 +95,22 @@
     loadUsers();
     loadAudit();
     loadLoginAttempts();
+
+    // لوحة إحصاءات المصاريف (متزامنة من المتجر المحمّل).
+    renderStatsPanel(container, 'admin-expenses-stats-panel', {
+      section: 'expenses',
+      title: 'إحصاءات المصاريف',
+      compute: function () { return window.TadreebStats.computeExpenses(); },
+      exportTitle: 'تصدير إحصاءات المصاريف',
+      exportFn: 'exportExpensesStats',
+      exportKind: 'expenses-stats',
+      columns: [
+        { id: 'category', label: 'الفئة', checked: true },
+        { id: 'course', label: 'الدورة', checked: true },
+        { id: 'count', label: 'عدد المصاريف', checked: true },
+        { id: 'total', label: 'الإجمالي (ل.س)', checked: true }
+      ]
+    });
 
     var form = document.getElementById('admin-user-form');
     form.addEventListener('submit', function (e) {
@@ -136,26 +193,41 @@
     box.innerHTML = UI.loadingState('جارٍ تحميل الحسابات…');
     window.TadreebAuth.listUsers().then(function (users) {
       var me = window.TadreebAuth.getCurrentProfile();
+      // لوحة إحصاءات المستخدمين (تُعاد رسمها عند كل تحميل للقائمة).
+      renderStatsPanel(document.getElementById('screen-container'), 'admin-users-stats-panel', {
+        section: 'users',
+        title: 'إحصاءات المستخدمين',
+        compute: function () { return window.TadreebStats.computeUsers(users); },
+        exportTitle: 'تصدير إحصاءات المستخدمين',
+        exportFn: 'exportUsersStats',
+        exportKind: 'users-stats',
+        exportParams: { users: users },
+        columns: [
+          { id: 'username', label: 'اسم المستخدم', checked: true },
+          { id: 'role', label: 'الدور', checked: true }
+        ]
+      });
       if (!users.length) {
         box.innerHTML = '<div class="muted">لا حسابات مسجلة.</div>';
         return;
       }
-      var html = '<div class="table-wrap"><table><thead><tr><th>اسم المستخدم</th><th>الدور</th><th>تاريخ الإنشاء</th><th>إجراءات</th></tr></thead><tbody>';
+      var html = '';
       users.forEach(function (u) {
         var isMe = me && u.uid === me.uid;
-        html += '<tr><td><strong>' + UI.escapeHtml(u.username) + '</strong>' + (isMe ? ' <span class="pill pill-navy">أنت</span>' : '') + '</td>' +
-          '<td><select class="input" data-role-select="' + UI.escapeHtml(u.uid) + '"' + (isMe ? ' disabled' : '') + '>' +
+        var created = UI.fmtTimestamp(u.createdAt);
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(u.username) + '</strong>' + (isMe ? ' <span class="pill pill-navy">أنت</span>' : '') + '</div>' +
+          (created ? '<div class="list-row-meta muted">أُنشئ في ' + UI.escapeHtml(created) + '</div>' : '') +
+          '</div><div class="list-row-actions row-actions">' +
+          '<select class="input" data-role-select="' + UI.escapeHtml(u.uid) + '"' + (isMe ? ' disabled' : '') + '>' +
           ['admin', 'editor', 'viewer'].map(function (r) {
             return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + UI.roleLabel(r) + '</option>';
-          }).join('') + '</select></td>' +
-          '<td>' + UI.escapeHtml(UI.fmtTimestamp(u.createdAt)) + '</td>' +
-          '<td><div class="row-actions">' +
+          }).join('') + '</select>' +
           (isMe ? '<span class="muted">لا يمكن حذف حسابك الحالي</span>' :
-            '<button class="link-btn danger" type="button" data-user-del="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '">حذف الحساب</button>') +
-          '</div></td></tr>';
+            '<button class="btn btn-danger btn-sm" type="button" data-user-del="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '">حذف الحساب</button>') +
+          '</div></div>';
       });
-      html += '</tbody></table></div>' +
-        '<div class="muted" style="margin-top:10px">حذف الحساب يزيل ملفه الشخصي فيمنع دخوله فوراً. حساب تسجيل الدخول نفسه يبقى في وحدة تحكم Firebase ويمكن حذفه نهائياً من هناك (Authentication ← Users).</div>';
+      html += '<div class="muted" style="margin-top:10px">حذف الحساب يزيل ملفه الشخصي فيمنع دخوله فوراً. حساب تسجيل الدخول نفسه يبقى في وحدة تحكم Firebase ويمكن حذفه نهائياً من هناك (Authentication ← Users).</div>';
       box.innerHTML = html;
 
       box.querySelectorAll('[data-role-select]').forEach(function (sel) {
@@ -207,15 +279,18 @@
         box.innerHTML = '<div class="muted">سجل التدقيق فارغ بعد.</div>';
         return;
       }
-      var html = '<div class="table-wrap"><table><thead><tr><th>الوقت</th><th>المستخدم</th><th>الإجراء</th><th>السجل</th><th>التفاصيل</th></tr></thead><tbody>';
+      var html = '';
       shown.forEach(function (e) {
-        html += '<tr class="audit-row"><td style="white-space:nowrap">' + UI.escapeHtml(UI.fmtTimestamp(e.ts)) + '</td>' +
-          '<td>' + UI.escapeHtml(e.username || '') + '</td>' +
-          '<td>' + UI.escapeHtml(actionLabel(e.action)) + '</td>' +
-          '<td>' + UI.escapeHtml(entityLabel(e.entity)) + '</td>' +
-          '<td class="audit-details">' + UI.escapeHtml(e.details || '') + '</td></tr>';
+        var entity = entityLabel(e.entity);
+        var meta = [];
+        if (e.username) meta.push(UI.escapeHtml(e.username));
+        meta.push(UI.escapeHtml(UI.fmtTimestamp(e.ts)));
+        if (e.details) meta.push(UI.escapeHtml(e.details));
+        html += '<div class="list-row audit-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(actionLabel(e.action)) + '</strong>' + (entity ? ' <span class="pill pill-grey">' + UI.escapeHtml(entity) + '</span>' : '') + '</div>' +
+          '<div class="list-row-meta muted">' + meta.join(' · ') + '</div>' +
+          '</div></div>';
       });
-      html += '</tbody></table></div>';
       if (entries.length > auditLimit) {
         html += '<div class="muted" style="margin-top:10px">عرض أحدث ' + auditLimit + ' من ' + entries.length + ' سجلاً.</div>';
       }
@@ -242,14 +317,15 @@
         box.innerHTML = '<div class="muted">لا محاولات دخول فاشلة مسجلة.</div>';
         return;
       }
-      var html = '<div class="table-wrap"><table><thead><tr><th>الوقت</th><th>بصمة المستخدم</th><th>الحالة</th></tr></thead><tbody>';
+      var html = '';
       attempts.forEach(function (a) {
-        html += '<tr><td style="white-space:nowrap">' + UI.escapeHtml(UI.fmtTimestamp(a.atMs)) + '</td>' +
-          '<td><span class="ltr">' + UI.escapeHtml(String(a.u || '').slice(0, 12) + '…') + '</span></td>' +
-          '<td>' + (a.locked ? '<span class="pill pill-red">قفل حساب</span>' : '<span class="muted">محاولة فاشلة</span>') + '</td></tr>';
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong><span class="ltr">' + UI.escapeHtml(String(a.u || '').slice(0, 12) + '…') + '</span></strong>' +
+          (a.locked ? ' <span class="pill pill-red">قفل حساب</span>' : '') + '</div>' +
+          '<div class="list-row-meta muted">' + UI.escapeHtml(UI.fmtTimestamp(a.atMs)) + (a.locked ? '' : ' · محاولة فاشلة') + '</div>' +
+          '</div></div>';
       });
-      html += '</tbody></table></div>' +
-        '<div class="muted" style="margin-top:10px">تُحفظ بصمة اسم المستخدم فقط — لا أسماء مستخدمين ولا كلمات مرور. يُقفل الحساب 15 دقيقة بعد 5 محاولات فاشلة.</div>';
+      html += '<div class="muted" style="margin-top:10px">تُحفظ بصمة اسم المستخدم فقط — لا أسماء مستخدمين ولا كلمات مرور. يُقفل الحساب 15 دقيقة بعد 5 محاولات فاشلة.</div>';
       box.innerHTML = html;
     }).catch(function (err) {
       box.innerHTML = '<div class="muted">تعذّر تحميل محاولات الدخول.</div>';
@@ -288,9 +364,12 @@
   }
 
   // ============ إعدادات المنصة (للمدير فقط) ============
-  // تجمع إعدادات المنصة العامة وإدارة المستخدمين. أقسام الفترات والعطل
-  // وفئات الميزانية منقولة من شاشة الدليل كما هي (نفس البطاقات والنماذج
-  // والتحقق)، مع ملاحظات الفترات والعطل كما كانت في الدليل.
+  // ستة أقسام مرتّبة (v2.1): الحسابات والمستخدمون، الفترات الدراسية،
+  // المستويات، الإعدادات العامة، العرض والتنسيق، حول المنصة. البطاقات
+  // نفسها كما كانت (نفس المعرّفات والنماذج والتحقق) — الترتيب فقط
+  // تغيّر: كل بطاقة داخل قسمها المرقّم، وكل قسم له عنوان ووصف.
+  // أقسام الفترات والعطل وفئات الميزانية منقولة من شاشة الدليل كما هي،
+  // مع ملاحظات الفترات والعطل كما كانت في الدليل.
 
   var SETTINGS_META = {
     period: { col: 'periods', label: 'الفترة التدريبية', title: 'فترة تدريبية' },
@@ -351,6 +430,18 @@
     { key: 'tracker', label: 'متابعة الدورات' }
   ];
 
+  // ---------- رأس قسم في شاشة الإعدادات ----------
+  // عنوان مرقّم بلغة تصميم v2 نفسها (شريط ذهبي + عنوان كحلي) مع وصف
+  // موجز. يفتح وسم <section> يُغلق بعد آخر بطاقة في القسم.
+  function settingsSectionHead(num, title, desc, topMargin) {
+    var top = (typeof topMargin === 'number') ? topMargin : 26;
+    return '<section style="margin-top:' + top + 'px">' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+      '<span aria-hidden="true" style="width:10px;height:2px;background:var(--gold);border-radius:2px;flex:none"></span>' +
+      '<h2 style="margin:0">' + num + ' — ' + UI.escapeHtml(title) + '</h2></div>' +
+      '<p class="muted" style="margin:6px 0 14px">' + UI.escapeHtml(desc) + '</p>';
+  }
+
   function renderSettings(container) {
     if (!App.isAdmin()) {
       container.innerHTML = '<div class="error-view"><div class="error-title">إعدادات المنصة متاحة للمدير فقط</div>' +
@@ -365,79 +456,115 @@
 
     var html = '';
     html += '<div class="page-head"><div><h1>إعدادات المنصة</h1>' +
-      '<div class="muted">إعدادات المنصة العامة — الفترات والعطل وفئات الميزانية ومستويات الدورات — وإدارة حسابات المستخدمين</div></div></div>';
+      '<div class="muted">ستة أقسام مرتّبة: الحسابات والمستخدمون، الفترات الدراسية، المستويات، الإعدادات العامة، العرض والتنسيق، حول المنصة</div></div></div>';
 
-    // 1 — الفترات التدريبية
+    html += settingsSectionHead(1, 'الحسابات والمستخدمون', 'حسابات المنصة وأدوارها، وصلاحيات كل دور.', 0);
+
+    // القسم 1 — الحسابات والمستخدمون: إدارة المستخدمين
+    html += '<div class="card-white"><div class="section-title-row"><h2>إدارة المستخدمين</h2>' +
+      '<button class="btn btn-sm" type="button" id="settings-add-user">إضافة مستخدم</button></div>' +
+      '<div id="settings-users-box">' + UI.loadingState('جارٍ تحميل الحسابات…') + '</div></div>';
+
+    // القسم 1 — الحسابات والمستخدمون: الصلاحيات (عرض فقط)
+    html += '<div class="card-white"><div class="section-title-row"><h2>الصلاحيات</h2></div>' +
+      '<p class="muted" style="margin-top:0">الصلاحيات ثابتة حسب الدور — تُدار الأدوار من قسم إدارة المستخدمين أعلاه، ولا يمكن تخصيص صلاحية لمستخدم بمفرده.</p>' +
+      permissionsMatrixHtml() + '</div>';
+
+    html += '</section>';
+
+    html += settingsSectionHead(2, 'الفترات الدراسية', 'أوقات الفترات التدريبية خلال اليوم.');
+
+    // القسم 2 — الفترات الدراسية
     html += '<div class="card-white"><div class="section-title-row"><h2>الفترات التدريبية</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-period"' + (periods.length >= 4 ? ' disabled title="الحد الأقصى 4 فترات"' : '') + '>إضافة فترة</button>' +
-      '</div><div class="period-grid">';
+      '</div>';
     if (!periods.length) html += '<div class="muted">لا فترات معرّفة.</div>';
     periods.forEach(function (p) {
       var duration = UI.fmtDuration(p.start, p.end);
-      html += '<div class="meta-box"><div class="k">' + UI.escapeHtml(p.label) + ' <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(p, 'periods')) + '</span></div>' +
-        '<div class="v">' + UI.fmtTimeRange(p.start, p.end) + '</div>' +
-        (duration ? '<div class="muted">المدة: ' + UI.escapeHtml(duration) + '</div>' : '') +
-        settingsActionRow('period', p.id) + '</div>';
+      html += '<div class="list-row"><div class="list-row-main">' +
+        '<div class="list-row-title"><strong>' + UI.escapeHtml(p.label) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(p, 'periods')) + '</span></div>' +
+        '<div class="list-row-meta muted">' + UI.fmtTimeRange(p.start, p.end) + (duration ? ' · المدة: ' + UI.escapeHtml(duration) : '') + '</div>' +
+        '</div><div class="list-row-actions row-actions">' + settingsActionRow('period', p.id) + '</div></div>';
     });
-    html += '</div><div class="muted">يمكن تعديل أوقات الفترات من هنا، وإضافة فترة رابعة عند الحاجة (الحد الأقصى 4 فترات).</div></div>';
+    html += '<div class="muted">يمكن تعديل أوقات الفترات من هنا، وإضافة فترة رابعة عند الحاجة (الحد الأقصى 4 فترات).</div></div>';
 
-    // 2 — العطل
+    // لوحة إحصاءات الفترات (v2.1 — بند 10).
+    html += '<div id="settings-periods-stats-panel"></div>';
+
+    html += '</section>';
+
+    html += settingsSectionHead(3, 'المستويات', 'مستويات الدورات الافتراضية والمخصصة.');
+
+    // القسم 3 — المستويات: مستويات الدورات (الافتراضية للعرض فقط + المخصصة قابلة للإدارة)
+    html += '<div class="card-white"><div class="section-title-row"><h2>مستويات الدورات</h2>' +
+      '<button class="btn btn-outline btn-sm" type="button" id="settings-add-level">إضافة مستوى</button>' +
+      '</div>';
+    Object.keys(App.LEVEL_LABELS).forEach(function (key) {
+      html += '<div class="list-row"><div class="list-row-main">' +
+        '<div class="list-row-title"><strong>' + UI.escapeHtml(App.LEVEL_LABELS[key]) + '</strong></div>' +
+        '<div class="list-row-meta muted">مستوى افتراضي — لا يمكن حذفه.</div>' +
+        '</div></div>';
+    });
+    html += '<div class="muted" style="margin:6px 0 10px">مستويات مخصصة:</div>';
+    if (!levels.length) html += '<div class="muted">لا مستويات مخصصة — أضف مستوى يظهر في نموذج الدورة.</div>';
+    levels.forEach(function (l) {
+      html += '<div class="list-row"><div class="list-row-main">' +
+        '<div class="list-row-title"><strong>' + UI.escapeHtml(l.name) + '</strong></div>' +
+        '</div><div class="list-row-actions row-actions">' +
+        '<button class="btn btn-outline btn-sm" type="button" data-settings-edit-level="' + UI.escapeHtml(l.id) + '">تعديل</button>' +
+        '<button class="btn btn-danger btn-sm" type="button" data-settings-del-level="' + UI.escapeHtml(l.id) + '">حذف</button>' +
+        '</div></div>';
+    });
+    html += '<div class="muted" style="margin-top:10px">تظهر المستويات المخصصة في نموذج الدورة. لا يمكن حذف مستوى معيّن في دورة.</div></div>';
+
+    // لوحة إحصاءات المستويات (v2.1 — بند 10).
+    html += '<div id="settings-levels-stats-panel"></div>';
+
+    html += '</section>';
+
+    html += settingsSectionHead(4, 'الإعدادات العامة', 'العطل التي تُتخطى عند توليد الجداول، وفئات مصروفات الميزانية.');
+
+    // القسم 4 — الإعدادات العامة: العطل
     html += '<div class="card-white"><div class="section-title-row"><h2>العطل</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-holiday">إضافة عطلة</button>' +
       '</div>';
     if (!holidays.length) {
       html += '<div class="muted">لا عطل مسجلة — تُتخطى العطل تلقائياً عند توليد الجداول.</div>';
     } else {
-      html += '<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>اسم العطلة</th><th>إجراءات</th></tr></thead><tbody>';
+      // العطل بلا معرّف (لا إدخال رمز في نموذجها ولا بادئة في
+      // CODE_PREFIXES) — لذا بلا قرص رمز في العنوان.
       holidays.forEach(function (h) {
-        html += '<tr><td>' + UI.escapeHtml(UI.fmtDateFull(h.date)) + '</td><td>' + UI.escapeHtml(h.name || '') + '</td>' +
-          '<td>' + settingsActionRow('holiday', h.id) + '</td></tr>';
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(h.name || '') + '</strong></div>' +
+          '<div class="list-row-meta muted">' + UI.escapeHtml(UI.fmtDateFull(h.date)) + '</div>' +
+          '</div><div class="list-row-actions row-actions">' + settingsActionRow('holiday', h.id) + '</div></div>';
       });
-      html += '</tbody></table></div>';
     }
     html += '</div>';
 
-    // 3 — فئات الميزانية
+    // لوحة إحصاءات العطل (v2.1 — بند 10).
+    html += '<div id="settings-holidays-stats-panel"></div>';
+
+    // القسم 4 — الإعدادات العامة: فئات الميزانية
     html += '<div class="card-white"><div class="section-title-row"><h2>فئات الميزانية</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-category">إضافة فئة</button>' +
-      '</div><div class="chips">';
-    if (!categories.length) html += '<span class="muted">لا فئات معرّفة.</span>';
+      '</div>';
+    if (!categories.length) html += '<div class="muted">لا فئات معرّفة.</div>';
     categories.forEach(function (c) {
-      html += '<span class="chip" style="cursor:default">' + UI.escapeHtml(App.displayCode(c, 'budgetCategories') + ' — ' + c.name) +
-        ' <button class="link-btn" type="button" data-settings-edit-category="' + UI.escapeHtml(c.id) + '" style="padding:0 2px">تعديل</button>' +
-        ' <button class="link-btn danger" type="button" data-settings-del-category="' + UI.escapeHtml(c.id) + '" style="padding:0 2px">✕</button>' +
-        '</span>';
+      html += '<div class="list-row"><div class="list-row-main">' +
+        '<div class="list-row-title"><strong>' + UI.escapeHtml(c.name) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(c, 'budgetCategories')) + '</span></div>' +
+        '</div><div class="list-row-actions row-actions">' +
+        '<button class="btn btn-outline btn-sm" type="button" data-settings-edit-category="' + UI.escapeHtml(c.id) + '">تعديل</button>' +
+        '<button class="btn btn-danger btn-sm" type="button" data-settings-del-category="' + UI.escapeHtml(c.id) + '">حذف</button>' +
+        '</div></div>';
     });
-    html += '</div><div class="muted" style="margin-top:10px">تظهر هذه الفئات في نموذج إضافة المصروف لكل دورة.</div></div>';
+    html += '<div class="muted" style="margin-top:10px">تظهر هذه الفئات في نموذج إضافة المصروف لكل دورة.</div></div>';
 
-    // 4 — مستويات الدورات (الافتراضية للعرض فقط + المخصصة قابلة للإدارة)
-    html += '<div class="card-white"><div class="section-title-row"><h2>مستويات الدورات</h2>' +
-      '<button class="btn btn-outline btn-sm" type="button" id="settings-add-level">إضافة مستوى</button>' +
-      '</div><div class="chips">';
-    Object.keys(App.LEVEL_LABELS).forEach(function (key) {
-      html += '<span class="chip" style="cursor:default">' + UI.escapeHtml(App.LEVEL_LABELS[key]) + '</span>';
-    });
-    html += '</div><div class="muted" style="margin:6px 0 10px">مستويات افتراضية — لا يمكن حذفها.</div><div class="chips">';
-    if (!levels.length) html += '<span class="muted">لا مستويات مخصصة — أضف مستوى يظهر في نموذج الدورة.</span>';
-    levels.forEach(function (l) {
-      html += '<span class="chip" style="cursor:default">' + UI.escapeHtml(l.name) +
-        ' <button class="link-btn" type="button" data-settings-edit-level="' + UI.escapeHtml(l.id) + '" style="padding:0 2px">تعديل</button>' +
-        ' <button class="link-btn danger" type="button" data-settings-del-level="' + UI.escapeHtml(l.id) + '" style="padding:0 2px">✕</button>' +
-        '</span>';
-    });
-    html += '</div><div class="muted" style="margin-top:10px">تظهر المستويات المخصصة في نموذج الدورة. لا يمكن حذف مستوى معيّن في دورة.</div></div>';
+    html += '</section>';
 
-    // 5 — إدارة المستخدمين
-    html += '<div class="card-white"><div class="section-title-row"><h2>إدارة المستخدمين</h2>' +
-      '<button class="btn btn-sm" type="button" id="settings-add-user">إضافة مستخدم</button></div>' +
-      '<div id="settings-users-box">' + UI.loadingState('جارٍ تحميل الحسابات…') + '</div></div>';
+    html += settingsSectionHead(5, 'العرض والتنسيق', 'تفضيلات العرض وتنسيق ملفات إكسل — محفوظة على هذا الجهاز فقط.');
 
-    // 6 — الصلاحيات (عرض فقط)
-    html += '<div class="card-white"><div class="section-title-row"><h2>الصلاحيات</h2></div>' +
-      '<p class="muted" style="margin-top:0">الصلاحيات ثابتة حسب الدور — تُدار الأدوار من قسم إدارة المستخدمين أعلاه، ولا يمكن تخصيص صلاحية لمستخدم بمفرده.</p>' +
-      permissionsMatrixHtml() + '</div>';
-
-    // 7 — إدارة العرض (محفوظة على هذا الجهاز فقط)
+    // القسم 5 — العرض والتنسيق: إدارة العرض (محفوظة على هذا الجهاز فقط)
     var calViewPref = UI.getSetting('calendarView', 'week');
     var dashCardsPref = UI.getSetting('dashboardCards', UI.SETTING_DEFAULTS.dashboardCards);
     var densityPref = UI.getSetting('tableDensity', 'comfortable');
@@ -462,7 +589,7 @@
       '<div class="field-hint">البطاقات غير المحددة لا تظهر في لوحة المعلومات.</div></div>' +
       '</div>';
 
-    // 8 — إدارة التنسيق (محفوظة على هذا الجهاز فقط)
+    // القسم 5 — العرض والتنسيق: إدارة التنسيق (محفوظة على هذا الجهاز فقط)
     var fmtPref = UI.getSetting('exportFmt', UI.SETTING_DEFAULTS.exportFmt);
     html += '<div class="card-white"><div class="section-title-row"><h2>إدارة التنسيق</h2></div>' +
       '<p class="muted" style="margin-top:0">تنسيق ملفات إكسل المصدَّرة — محفوظ على هذا الجهاز فقط.</p>' +
@@ -481,16 +608,70 @@
       '<label class="check-row"><input type="checkbox" id="settings-export-title"' + (fmtPref.title !== false ? ' checked' : '') + '> تضمين صف العنوان</label>' +
       '</div>';
 
-    // 9 — حول المنصة
+    html += '</section>';
+
+    html += settingsSectionHead(6, 'حول المنصة', 'إصدار المنصة وأرقامها الموجزة.');
+
+    // القسم 6 — حول المنصة
     html += '<div class="card-white"><div class="section-title-row"><h2>حول المنصة</h2></div>' +
-      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.0</p>' +
+      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.1</p>' +
       '<div class="stats" style="margin-bottom:0">' +
       '<div class="stat"><div class="stat-num" id="settings-count-users">…</div><div class="stat-label">عدد المستخدمين</div></div>' +
       '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('courses').length) + '</div><div class="stat-label">عدد الدورات</div></div>' +
       '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('trainees').length) + '</div><div class="stat-label">عدد المتدربين</div></div>' +
       '</div></div>';
 
+    html += '</section>';
+
     container.innerHTML = html;
+
+    // لوحات إحصاءات الأقسام (v2.1 — بند 10): الفترات والمستويات
+    // والعطل. فئات الميزانية بلا لوحة (الصرف حسب الفئة في لوحة
+    // المصاريف في شاشة الإدارة)؛ ومستخدمو هذا القسم وحول المنصة بلا
+    // لوحات (لوحة المستخدمين في شاشة الإدارة، وعدّادات حول المنصة قائمة).
+    renderStatsPanel(container, 'settings-periods-stats-panel', {
+      section: 'periods',
+      title: 'إحصاءات الفترات',
+      compute: function () { return window.TadreebStats.computePeriods(); },
+      exportTitle: 'تصدير إحصاءات الفترات',
+      exportFn: 'exportPeriodsStats',
+      exportKind: 'periods-stats',
+      columns: [
+        { id: 'label', label: 'الفترة', checked: true },
+        { id: 'code', label: 'المعرّف', checked: true },
+        { id: 'time', label: 'الوقت', checked: true },
+        { id: 'duration', label: 'المدة (دقيقة)', checked: true },
+        { id: 'sessions', label: 'عدد الجلسات', checked: true },
+        { id: 'share', label: 'الحصة %', checked: true }
+      ]
+    });
+    renderStatsPanel(container, 'settings-levels-stats-panel', {
+      section: 'levels',
+      title: 'إحصاءات المستويات',
+      compute: function () { return window.TadreebStats.computeLevels(); },
+      exportTitle: 'تصدير إحصاءات المستويات',
+      exportFn: 'exportLevelsStats',
+      exportKind: 'levels-stats',
+      columns: [
+        { id: 'level', label: 'المستوى', checked: true },
+        { id: 'courses', label: 'عدد الدورات', checked: true },
+        { id: 'sessions', label: 'عدد الجلسات', checked: true },
+        { id: 'trainees', label: 'عدد المتدربين', checked: true }
+      ]
+    });
+    renderStatsPanel(container, 'settings-holidays-stats-panel', {
+      section: 'holidays',
+      title: 'إحصاءات العطل',
+      compute: function () { return window.TadreebStats.computeHolidays(); },
+      exportTitle: 'تصدير العطل',
+      exportFn: 'exportHolidays',
+      exportKind: 'holidays',
+      columns: [
+        { id: 'date', label: 'التاريخ', checked: true },
+        { id: 'name', label: 'اسم العطلة', checked: true },
+        { id: 'note', label: 'الملاحظة', checked: true }
+      ]
+    });
 
     loadSettingsUsers();
 
@@ -590,12 +771,12 @@
     });
   }
 
+  // أزرار إجراءات صفّ الفترة/العطلة (نمط القوائم المرتبة v2.1):
+  // أزرار ظاهرة حقيقية — تُستدعى داخل <div class="list-row-actions">.
   function settingsActionRow(type, id) {
-    return '<div class="p-actions row-actions">' +
-      '<button class="link-btn" type="button" data-settings-notes="' + type + '" data-id="' + UI.escapeHtml(id) + '">ملاحظات</button>' +
-      '<button class="link-btn" type="button" data-settings-edit="' + type + '" data-id="' + UI.escapeHtml(id) + '">تعديل</button>' +
-      '<button class="link-btn danger" type="button" data-settings-del-entity="' + type + '" data-id="' + UI.escapeHtml(id) + '">حذف</button>' +
-      '</div>';
+    return '<button class="btn btn-outline btn-sm" type="button" data-settings-notes="' + type + '" data-id="' + UI.escapeHtml(id) + '">ملاحظات</button>' +
+      '<button class="btn btn-outline btn-sm" type="button" data-settings-edit="' + type + '" data-id="' + UI.escapeHtml(id) + '">تعديل</button>' +
+      '<button class="btn btn-danger btn-sm" type="button" data-settings-del-entity="' + type + '" data-id="' + UI.escapeHtml(id) + '">حذف</button>';
   }
 
   // --- الفترات والعطل: نماذج منقولة من شاشة الدليل كما هي ---
@@ -911,26 +1092,28 @@
         box.innerHTML = '<div class="muted">لا حسابات مسجلة.</div>';
         return;
       }
-      var html = '<div class="table-wrap"><table><thead><tr><th>اسم المستخدم</th><th>الدور</th><th>الحالة</th><th>إجراءات</th></tr></thead><tbody>';
+      var html = '';
       users.forEach(function (u) {
         var isMe = me && u.uid === me.uid;
         var disabled = u.disabled === true;
-        html += '<tr><td><strong>' + UI.escapeHtml(u.username) + '</strong>' + (isMe ? ' <span class="pill pill-navy">أنت</span>' : '') + '</td>' +
-          '<td><select class="input" data-settings-role="' + UI.escapeHtml(u.uid) + '"' + (isMe ? ' disabled title="لا يمكنك تغيير دور حسابك الحالي"' : '') + '>' +
+        var created = UI.fmtTimestamp(u.createdAt);
+        html += '<div class="list-row"><div class="list-row-main">' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(u.username) + '</strong>' + (isMe ? ' <span class="pill pill-navy">أنت</span>' : '') +
+          ' ' + (disabled ? '<span class="pill pill-red">معطّل</span>' : '<span class="pill pill-green">نشط</span>') + '</div>' +
+          (created ? '<div class="list-row-meta muted">أُنشئ في ' + UI.escapeHtml(created) + '</div>' : '') +
+          '</div><div class="list-row-actions row-actions">' +
+          '<select class="input" data-settings-role="' + UI.escapeHtml(u.uid) + '"' + (isMe ? ' disabled title="لا يمكنك تغيير دور حسابك الحالي"' : '') + '>' +
           ['admin', 'editor', 'viewer'].map(function (r) {
             return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + UI.roleLabel(r) + '</option>';
-          }).join('') + '</select></td>' +
-          '<td>' + (disabled ? '<span class="pill pill-red">معطّل</span>' : '<span class="pill pill-green">نشط</span>') + '</td>' +
-          '<td><div class="row-actions">' +
-          '<button class="link-btn" type="button" data-settings-reset="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '">إعادة تعيين كلمة المرور</button>' +
-          (isMe ? '<button class="link-btn" type="button" disabled title="لا يمكنك تعطيل حسابك الحالي">تعطيل</button>' :
-            '<button class="link-btn" type="button" data-settings-toggle="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '" data-disabled="' + (disabled ? '1' : '0') + '">' + (disabled ? 'تفعيل' : 'تعطيل') + '</button>') +
+          }).join('') + '</select>' +
+          '<button class="btn btn-outline btn-sm" type="button" data-settings-reset="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '">إعادة تعيين كلمة المرور</button>' +
+          (isMe ? '<button class="btn btn-outline btn-sm" type="button" disabled title="لا يمكنك تعطيل حسابك الحالي">تعطيل</button>' :
+            '<button class="btn btn-outline btn-sm" type="button" data-settings-toggle="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '" data-disabled="' + (disabled ? '1' : '0') + '">' + (disabled ? 'تفعيل' : 'تعطيل') + '</button>') +
           (isMe ? '<span class="muted">لا يمكن حذف حسابك الحالي</span>' :
-            '<button class="link-btn danger" type="button" data-settings-del-user="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '">حذف</button>') +
-          '</div></td></tr>';
+            '<button class="btn btn-danger btn-sm" type="button" data-settings-del-user="' + UI.escapeHtml(u.uid) + '" data-username="' + UI.escapeHtml(u.username) + '">حذف</button>') +
+          '</div></div>';
       });
-      html += '</tbody></table></div>' +
-        '<div class="muted" style="margin-top:10px">تعطيل الحساب يمنع دخوله فوراً، ويُنهي جلسته النشطة إن وُجدت، ويمكن التراجع عنه في أي وقت. حذف الحساب يزيله من المنصة فيمنع دخوله؛ حساب تسجيل الدخول نفسه يبقى في وحدة تحكم Firebase ويمكن حذفه نهائياً من هناك (Authentication ← Users).</div>';
+      html += '<div class="muted" style="margin-top:10px">تعطيل الحساب يمنع دخوله فوراً، ويُنهي جلسته النشطة إن وُجدت، ويمكن التراجع عنه في أي وقت. حذف الحساب يزيله من المنصة فيمنع دخوله؛ حساب تسجيل الدخول نفسه يبقى في وحدة تحكم Firebase ويمكن حذفه نهائياً من هناك (Authentication ← Users).</div>';
       box.innerHTML = html;
 
       box.querySelectorAll('[data-settings-role]').forEach(function (sel) {

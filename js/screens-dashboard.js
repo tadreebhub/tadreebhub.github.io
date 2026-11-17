@@ -15,6 +15,27 @@
     return { start: UI.dateToStr(start), end: UI.dateToStr(end) };
   }
 
+  // تنسيق الأوقات بنظام 12 ساعة مع ص/م (v2.1 — بند 8) عبر
+  // window.TadreebTime.formatTime12/formatTimeRange12، مع عودة
+  // إلى التنسيق الحالي (24 ساعة) إن لم تتوفر الدوال بعد.
+  function fmtTime12(hhmm) {
+    try {
+      if (window.TadreebTime && typeof window.TadreebTime.formatTime12 === 'function') {
+        return window.TadreebTime.formatTime12(hhmm);
+      }
+    } catch (e) { /* يعود إلى الاحتياطي أدناه */ }
+    return hhmm || '';
+  }
+  function fmtRange12(start, end) {
+    if (!start || !end) return '';
+    try {
+      if (window.TadreebTime && typeof window.TadreebTime.formatTimeRange12 === 'function') {
+        return '<span class="ltr">' + UI.escapeHtml(window.TadreebTime.formatTimeRange12(start, end)) + '</span>';
+      }
+    } catch (e) { /* يعود إلى الاحتياطي أدناه */ }
+    return UI.fmtTimeRange(start, end);
+  }
+
   function render(container) {
     var Store = App.Store;
     var today = UI.todayStr();
@@ -27,7 +48,6 @@
         var pb = Store.get('periods', b.periodId);
         return (pa ? pa.order : 99) - (pb ? pb.order : 99);
       });
-    var traineesCount = Store.getAll('trainees').length;
 
     var upcoming = sessions.filter(function (s) {
       return s.date > today && s.state !== 'cancelled' && s.state !== 'holiday';
@@ -54,13 +74,13 @@
       (hasClock ? ' · <span id="dash-clock" class="ltr">' + UI.escapeHtml(timeLine) + '</span>' : '') + '</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="dash-export-btn">تصدير إكسل ↓</button></div></div>';
 
+    // لوحة إحصاءات لوحة التحكم (v2.1 — بند 10): تحل محل شريط
+    // البطاقات الأربع القديم؛ تُرسم بعد innerHTML عبر TadreebStats
+    // (11 مقياساً افتراضياً، قابلة للتخصيص من زر «تخصيص» وتُحفظ
+    // اختيارات المستخدم على جهازه). التبديل من الإعدادات
+    // (dashboardCards.stats) ما زال يخفي اللوحة كلها.
     if (showCard('stats')) {
-      html += '<div class="stats">' +
-        '<div class="stat"><div class="stat-num">' + UI.fmtNumber(activeCourses.length) + '</div><div class="stat-label">دورات نشطة</div></div>' +
-        '<div class="stat"><div class="stat-num">' + UI.fmtNumber(todaySessions.length) + '</div><div class="stat-label">جلسات اليوم</div></div>' +
-        '<div class="stat"><div class="stat-num" id="dash-week-rate">—</div><div class="stat-label">نسبة الحضور هذا الأسبوع</div></div>' +
-        '<div class="stat"><div class="stat-num">' + UI.fmtNumber(traineesCount) + '</div><div class="stat-label">متدرب مسجل</div></div>' +
-        '</div>';
+      html += '<div id="dash-stats-panel"></div>';
     }
 
     // جلسات اليوم + ملخص الحضور هذا الأسبوع (بطاقتان متتاليتان).
@@ -73,12 +93,19 @@
         todaySessions.forEach(function (s) {
           var course = Store.get('courses', s.courseId);
           var period = Store.get('periods', s.periodId);
-          todayHtml += '<div class="session-item clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
-            '<div><strong>' + UI.escapeHtml(course ? course.name : '') + '</strong>' +
-            '<div class="muted">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') +
+          // نمط القائمة المرتبة (v2.1): اسم الدورة + معرّف الجلسة
+          // (رمز الدورة / رقم الجلسة) + حقائق أساسية + زر «خيارات»
+          // ظاهر — النقر عليه يصل إلى معالج الصف (يفتح ورقة
+          // إجراءات الجلسة نفسها). صنف .session-item محفوظ
+          // (الاختبارات تنقر عليه).
+          todayHtml += '<div class="session-item list-row clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
+            '<div class="list-row-main"><div class="list-row-title"><strong>' + UI.escapeHtml(course ? course.name : '') + '</strong> ' +
+            '<span class="pill pill-grey">' + UI.escapeHtml(App.sessionLabel(s, course)) + '</span></div>' +
+            '<div class="list-row-meta muted">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') +
             ' · ' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') +
             ' ' + UI.pillForSessionState(s.state) + '</div></div>' +
-            '<div class="session-time ltr">' + UI.escapeHtml(period ? period.start : '') + '</div></div>';
+            '<div class="list-row-actions row-actions"><span class="session-time ltr">' + UI.escapeHtml(period ? fmtTime12(period.start) : '') + '</span>' +
+            '<button class="btn btn-outline btn-sm" type="button">خيارات</button></div></div>';
         });
       }
       todayHtml += '</div>';
@@ -98,18 +125,24 @@
       if (!upcoming.length) {
         html += UI.emptyState('لا جلسات قادمة', 'لا توجد جلسات مجدولة في الأيام القادمة.');
       } else {
-        html += '<div class="table-wrap"><table class="t-compact"><thead><tr><th>الدورة</th><th>التاريخ</th><th>الوقت</th><th class="hide-m">القاعة</th><th class="hide-m">المدرب</th></tr></thead><tbody>';
+        // قائمة مرتبة (v2.1) بدل الجدول — كل الحقائق ظاهرة على
+        // الهاتف أيضاً (كانت القاعة والمدرب مخفيين بـ hide-m)،
+        // وزر «خيارات» ظاهر يفتح ورقة إجراءات الجلسة.
         upcoming.forEach(function (s) {
           var course = Store.get('courses', s.courseId);
           var period = Store.get('periods', s.periodId);
-          html += '<tr class="clickable" data-session-open="' + UI.escapeHtml(s.id) + '"><td>' +
-            UI.escapeHtml(course ? course.name : '') + '</td><td>' +
-            UI.escapeHtml(UI.fmtDateFull(s.date)) + '</td><td>' +
-            (period ? UI.fmtTimeRange(period.start, period.end) : '') + '</td>' +
-            '<td class="hide-m">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') + '</td>' +
-            '<td class="hide-m">' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') + '</td></tr>';
+          html += '<div class="list-row clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
+            '<div class="list-row-main"><div class="list-row-title"><strong>' +
+            UI.escapeHtml(course ? course.name : '') + '</strong> ' +
+            '<span class="pill pill-grey">' + UI.escapeHtml(App.sessionLabel(s, course)) + '</span></div>' +
+            '<div class="list-row-meta muted">' +
+            UI.escapeHtml(UI.fmtDateFull(s.date)) + ' · ' +
+            (period ? fmtRange12(period.start, period.end) : '') + ' · ' +
+            UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') + ' · ' +
+            UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') +
+            ' ' + UI.pillForSessionState(s.state) + '</div></div>' +
+            '<div class="list-row-actions row-actions"><button class="btn btn-outline btn-sm" type="button">خيارات</button></div></div>';
         });
-        html += '</tbody></table></div>';
       }
       html += '</div>';
     }
@@ -123,8 +156,9 @@
         activeCourses.forEach(function (c) {
           var prog = App.courseProgress(c.id);
           html += '<div style="margin-bottom:14px"><div class="section-title-row"><span class="track-name" data-course-open="' +
-            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted">' +
-            prog.done + ' من ' + prog.total + ' جلسة</span></div>' +
+            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted" style="flex:1">' +
+            prog.done + ' من ' + prog.total + ' جلسة</span>' +
+            '<button class="btn btn-outline btn-sm" type="button" data-course-open="' + UI.escapeHtml(c.id) + '">عرض</button></div>' +
             '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
         });
       }
@@ -141,8 +175,9 @@
         var prog = App.courseProgress(c.id);
         var budget = App.budgetFromCache(c.id);
         var spentPct = budget.allocated > 0 ? Math.min(100, Math.round((budget.totalSpent / budget.allocated) * 100)) : 0;
-        html += '<div class="track-row"><div class="track-name" data-course-open="' + UI.escapeHtml(c.id) + '">' +
+        html += '<div class="track-row"><div><div class="track-name" data-course-open="' + UI.escapeHtml(c.id) + '">' +
           UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</div>' +
+          '<button class="btn btn-outline btn-sm" type="button" data-course-open="' + UI.escapeHtml(c.id) + '" style="margin-top:6px">عرض</button></div>' +
           '<div class="track-meter"><div class="track-label">الجلسات: ' + prog.done + ' من ' + prog.total + ' · ' + prog.percent + '%</div>' +
           '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>' +
           '<div class="track-meter"><div class="track-label">الميزانية: ' + UI.fmtMoney(budget.totalSpent) + ' من ' + UI.fmtMoney(budget.allocated) + ' · ' + spentPct + '%</div>' +
@@ -153,6 +188,20 @@
     }
 
     container.innerHTML = html;
+
+    // لوحة إحصاءات لوحة التحكم (v2.1 — بند 10) — تُرسم بعد
+    // innerHTML، ويُحفظ عنصرها لملء نسبة الحضور غير المتزامنة
+    // عبر updateMetrics في loadWeekAttendance. بلا زر تصدير في
+    // اللوحة نفسها — «ملخص المنصة» خيار في نافذة التصدير أعلاه.
+    var dashPanelEl = container.querySelector('#dash-stats-panel');
+    if (dashPanelEl && window.TadreebStats) {
+      var dashRes = window.TadreebStats.computeDashboard();
+      window.TadreebStats.renderPanel(dashPanelEl, {
+        section: 'dashboard',
+        title: 'إحصاءات لوحة التحكم',
+        metrics: dashRes.metrics
+      });
+    }
 
     // الساعة الحية بتوقيت سوريا — تُحدَّث كل ثانية ما دامت الشاشة معروضة.
     if (hasClock) {
@@ -188,9 +237,16 @@
           ],
           scopeOptions: [
             { id: 'today', label: 'اليوم فقط' },
-            { id: 'week', label: 'الأسبوع كاملاً' }
+            { id: 'week', label: 'الأسبوع كاملاً' },
+            { id: 'summary', label: 'ملخص المنصة' }
           ],
           onConfirm: function (result) {
+            if (result.scope === 'summary') {
+              App.buildSummaryData().then(function (data) {
+                UI.callExport('exportSummary', [data]);
+              });
+              return;
+            }
             if (result.scope === 'week') {
               var bounds = weekBounds();
               var start = UI.parseDateStr(bounds.start);
@@ -215,8 +271,9 @@
       if (!weekSessions.length) {
         var box0 = document.getElementById('dash-week-attendance');
         if (box0) box0.innerHTML = '<div class="muted">لا جلسات هذا الأسبوع.</div>';
-        var rate0 = document.getElementById('dash-week-rate');
-        if (rate0) rate0.textContent = '—';
+        if (dashPanelEl && window.TadreebStats) {
+          window.TadreebStats.updateMetrics(dashPanelEl, { weekAttendanceRate: null });
+        }
         return;
       }
       var counts = { present: 0, absent: 0, excused: 0 };
@@ -234,8 +291,13 @@
       chain.then(function () {
         var total = counts.present + counts.absent + counts.excused;
         var box = document.getElementById('dash-week-attendance');
-        var rate = document.getElementById('dash-week-rate');
-        if (rate) rate.textContent = total ? UI.fmtPercent(counts.present, total) : '—';
+        // ملء نسبة الحضور في لوحة الإحصاءات (v2.1 — بند 10) —
+        // رقم 0–100 (تنسيق pct في TadreebStats يضيف «%»).
+        if (dashPanelEl && window.TadreebStats) {
+          window.TadreebStats.updateMetrics(dashPanelEl, {
+            weekAttendanceRate: total ? Math.round((counts.present / total) * 100) : null
+          });
+        }
         if (!box) return;
         if (!total) {
           box.innerHTML = '<div class="muted">لم يُسجَّل حضور بعد هذا الأسبوع.</div>';
