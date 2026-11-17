@@ -9,6 +9,7 @@
   --ink:#16232E; --muted:#5A6B7A; --accent:#2F6F8F;
   --green:#2E7D32; --greenbg:#E6F4EA; --red:#C62828; --redbg:#FDECEA;
   --amber:#B45309; --amberbg:#FEF3C7; --grey:#64748B; --greybg:#F1F5F9;
+  --violet:#6D28D9; --violetbg:#EDE9FE;
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -97,6 +98,7 @@ tbody tr.selected-row{background:#EAF3F8}
 .pill-red{background:var(--redbg);color:var(--red)}
 .pill-amber{background:var(--amberbg);color:var(--amber)}
 .pill-navy{background:#E8EEF3;color:var(--navy)}
+.pill-violet{background:var(--violetbg);color:var(--violet)}
 .pill-grey{background:var(--greybg);color:var(--grey)}
 .progress{height:10px;background:#E2E8F0;border-radius:999px;overflow:hidden;min-width:110px}
 .progress>i{display:block;height:100%;background:var(--accent);border-radius:999px}
@@ -113,6 +115,8 @@ tbody tr.selected-row{background:#EAF3F8}
 .hl{font-size:12.5px;padding:4px 8px;border-radius:6px;margin:3px 0;line-height:1.5;white-space:nowrap}
 .hl-busy{background:#E8EEF3;color:var(--navy);cursor:pointer}
 .hl-busy:hover{background:#D3DEE7}
+.hl-meeting{background:var(--violetbg);color:var(--violet);cursor:pointer}
+.hl-meeting:hover{background:#DDD6FE}
 .hl-free{background:var(--greenbg);color:var(--green)}
 .hl-cancel{background:var(--greybg);color:var(--grey);cursor:pointer}
 .hl-holiday{background:var(--amberbg);color:var(--amber)}
@@ -142,6 +146,8 @@ tbody tr.selected-row{background:#EAF3F8}
 .m-day{font-size:16px;color:var(--navy);margin-bottom:4px}
 .m-chip{display:inline-block;background:#E8EEF3;color:var(--navy);border-radius:5px;padding:1px 7px;font-size:12px;margin:1px 2px 1px 0;line-height:1.6;white-space:nowrap;cursor:pointer}
 .m-chip:hover{background:#D3DEE7}
+.m-meeting{background:var(--violetbg);color:var(--violet)}
+.m-chip.m-meeting:hover{background:#DDD6FE}
 .m-cancel{background:#F1F5F9;color:#64748B}
 .m-holiday{background:var(--amberbg);color:var(--amber);cursor:default}
 .today-cell{background:#EAF3F8;box-shadow:inset 0 0 0 2px var(--accent)}
@@ -255,3 +261,37 @@ input.input{padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px}
   .m-chip{font-size:11px}
   .search-input{min-width:0;flex:1}
 }
+
+/* ---------- ورقة إجراءات الجلسة (v1.1) ---------- */
+.sheet-summary{background:var(--card);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.sheet-summary-title{font-size:17px;color:var(--navy);margin-bottom:8px}
+.sheet-summary .k{font-size:13px;color:var(--muted);margin-left:6px}
+.sheet-actions{display:flex;flex-direction:column}
+.sheet-action{display:block;width:100%;text-align:right;background:none;border:none;border-bottom:1px solid var(--line);padding:13px 6px;font-size:15px;color:var(--ink);cursor:pointer}
+.sheet-action:last-child{border-bottom:none}
+.sheet-action:hover{background:#F8FAFC}
+.sheet-action.danger{color:var(--red)}
+.sheet-action.danger:hover{background:var(--redbg)}
+.hl-holiday[data-session-open]{cursor:pointer}
+.hl-holiday[data-session-open]:hover{background:#FDE68A}
+.m-chip.m-holiday[data-session-open]{cursor:pointer}
+.m-chip.m-holiday[data-session-open]:hover{background:#FDE68A}
+
+/* ملخص الحضور داخل مكوّن الحضور */
+.att-note-box{background:#F8FAFC;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.att-summary{background:var(--card);border-radius:10px;padding:14px 16px;margin-bottom:16px}
+.att-sum-trainer{margin-bottom:10px;color:var(--navy)}
+.att-sum-group{padding:8px 0;border-top:1px solid var(--line)}
+.att-sum-title{color:var(--navy);margin-bottom:2px}
+
+@media (max-width:700px){
+  .modal-card.sheet{position:fixed;left:0;right:0;bottom:0;top:auto;margin:0;max-width:none;width:100%;max-height:85vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column}
+  .modal-card.sheet .modal-body{overflow-y:auto;flex:1;min-height:0}
+}
+
+/* ---------- كثافة الجداول المدمجة (إعداد العرض — صنف density-compact على body) ---------- */
+body.density-compact th,body.density-compact td{padding:6px 8px;font-size:13px}
+body.density-compact .card,body.density-compact .card-white{padding:14px 16px}
+body.density-compact .stat-num{font-size:22px}
+body.density-compact .session-item{padding:8px 0}
+body.density-compact .track-row{padding:8px 0}
