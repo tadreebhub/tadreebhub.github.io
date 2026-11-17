@@ -57,9 +57,12 @@ service cloud.firestore {
     // البيانات: حساب حُذف ملفه أو عُطّل لا يقرأ شيئاً عبر واجهة
     // Firestore المباشرة حتى لو بقي رمز الدخول (token) صالحاً
     // (حساب Auth نفسه يبقى في وحدة التحكم حتى يحذفه المدير يدوياً).
+    // ⚠️ لا تستخدم .data.disabled مباشرة: الملفات لا تحوي حقل
+    // disabled أصلاً (يُضاف فقط عند التعطيل)، والوصول لحقل غائب
+    // بنقطة (.) يُسقط القاعدة كلها (رفض). .get(..., false) آمن.
     function hasProfile() {
       return profileExists() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.disabled != true;
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('disabled', false) != true;
     }
 
     function setupComplete() {
