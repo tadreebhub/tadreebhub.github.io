@@ -4,6 +4,16 @@
   'use strict';
 
   var currentFilter = 'all';
+  var currentLevelFilter = 'all';
+
+  // تسميات حالة الإنجاز المشتقة (مفاتيح App.courseProgress().status).
+  var COMPLETION_FILTER_LABELS = { all: 'الكل', completed: 'مكتملة', 'in-progress': 'جارية', cancelled: 'ملغاة', paused: 'متوقفة' };
+
+  function completionPill(status) {
+    var cls = status === 'completed' ? 'pill-green' : status === 'cancelled' ? 'pill-red' :
+      status === 'paused' ? 'pill-amber' : 'pill-navy';
+    return '<span class="pill ' + cls + '">' + UI.escapeHtml(COMPLETION_FILTER_LABELS[status] || status || '') + '</span>';
+  }
 
   // ================= قائمة الدورات =================
   function renderCourses(container) {
@@ -11,7 +21,12 @@
     var canWrite = App.canWrite();
     var courses = Store.getAll('courses').slice();
     if (currentFilter !== 'all') {
-      courses = courses.filter(function (c) { return c.status === currentFilter; });
+      courses = courses.filter(function (c) { return App.courseProgress(c).status === currentFilter; });
+    }
+    // فلتر المستوى يطبَّق مع فلتر الإنجاز (AND)؛ الدورات القديمة بلا
+    // مستوى تُعامل كمستوى «none» (بدون مستوى).
+    if (currentLevelFilter !== 'all') {
+      courses = courses.filter(function (c) { return (c.level || 'none') === currentLevelFilter; });
     }
     courses.sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
@@ -21,15 +36,19 @@
     html += '<div class="page-head"><div><h1>الدورات</h1>' +
       '<div class="muted">جميع الدورات التدريبية الحالية والسابقة</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="courses-export-btn">تصدير إكسل ↓</button>';
-    if (canWrite) html += '<button class="btn" type="button" id="new-course-btn">دورة جديدة</button>';
+    if (canWrite) html += '<button class="btn btn-outline btn-sm" type="button" id="courses-stats-btn">تصدير الإحصائيات ↓</button>' +
+      '<button class="btn" type="button" id="new-course-btn">دورة جديدة</button>';
     html += '</div></div>';
 
-    var chips = [['all', 'الكل'], ['active', 'نشطة'], ['completed', 'مكتملة'], ['cancelled', 'ملغاة']];
+    var chips = [['all', 'الكل'], ['completed', 'مكتملة'], ['in-progress', 'جارية'], ['cancelled', 'ملغاة'], ['paused', 'متوقفة']];
     html += '<div class="chips">';
     chips.forEach(function (chip) {
       html += '<button class="chip' + (currentFilter === chip[0] ? ' active' : '') + '" type="button" data-filter="' +
         chip[0] + '">' + chip[1] + '</button>';
     });
+    html += '<select id="courses-level-filter" aria-label="فلترة حسب المستوى" style="margin-inline-start:8px">' +
+      '<option value="all"' + (currentLevelFilter === 'all' ? ' selected' : '') + '>كل المستويات</option>' +
+      levelFilterOptionsHtml() + '</select>';
     html += '</div>';
 
     html += '<div class="card">';
@@ -38,23 +57,26 @@
         'لم تُنشأ أي دورة بعد.' : 'لا دورات بهذه الحالة.',
         canWrite && currentFilter === 'all' ? 'دورة جديدة' : null, 'courses-empty-new');
     } else {
-      html += '<div class="table-wrap"><table><thead><tr><th>الدورة</th><th>المدرب</th><th>القاعات</th><th>الأيام</th><th>الجلسات</th><th>التقدم</th><th>الحالة</th><th>المتدربون</th><th>إجراءات</th></tr></thead><tbody>';
+      html += '<div class="table-wrap"><table><thead><tr><th>الدورة</th><th>المدرب</th><th>القاعات</th><th>الأيام</th><th>الجلسات</th><th>الإنجاز</th><th>المتبقية</th><th>الحالة</th><th>المستوى</th><th>المتدربون</th><th>إجراءات</th></tr></thead><tbody>';
       courses.forEach(function (c) {
-        var prog = App.courseProgress(c.id);
+        var prog = App.courseProgress(c);
         var halls = App.hallsUsedByCourse(c.id);
         html += '<tr class="clickable" data-course-open="' + UI.escapeHtml(c.id) + '">' +
-          '<td><strong>' + UI.escapeHtml(c.name) + '</strong></td>' +
+          '<td><strong>' + UI.escapeHtml(c.name) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(c, 'courses')) + '</span></td>' +
           '<td>' + UI.escapeHtml(App.trainerName(c.trainerId) || 'بلا مدرب') + '</td>' +
           '<td>' + UI.escapeHtml(halls.length ? halls.join(' · ') : '—') + '</td>' +
           '<td>' + UI.escapeHtml(UI.daysLabel(c.days)) + '</td>' +
-          '<td>' + UI.fmtNumber(c.sessionCount) + '</td>' +
-          '<td><div class="prog-row"><div class="progress"><i style="width:' + prog.percent + '%"></i></div><span class="muted">' + prog.percent + '%</span></div></td>' +
-          '<td>' + UI.pillForCourseStatus(c.status) + '</td>' +
-          '<td>' + UI.fmtNumber((c.traineeIds || []).length) + '</td>' +
+          '<td>' + prog.done + '/' + prog.sessionsTotal + '</td>' +
+          '<td><div class="prog-row"><div class="progress"><i style="width:' + prog.pct + '%"></i></div><span class="muted">' + prog.pct + '%</span></div></td>' +
+          '<td>' + prog.sessionsRemaining + '</td>' +
+          '<td>' + completionPill(prog.status) + '</td>' +
+          '<td>' + UI.escapeHtml(App.levelName(c.level)) + '</td>' +
+          '<td>' + UI.fmtNumber(App.courseTrainees(c).length) + '</td>' +
           '<td><div class="row-actions">' +
           '<button class="link-btn" type="button" data-course-view="' + UI.escapeHtml(c.id) + '">عرض</button>';
         if (canWrite) {
           html += '<button class="link-btn" type="button" data-course-edit="' + UI.escapeHtml(c.id) + '">تعديل</button>' +
+            '<button class="link-btn" type="button" data-course-rename="' + UI.escapeHtml(c.id) + '">إعادة تسمية</button>' +
             '<button class="link-btn danger" type="button" data-course-del="' + UI.escapeHtml(c.id) + '">حذف</button>';
         }
         html += '</div></td></tr>';
@@ -70,6 +92,11 @@
         currentFilter = btn.getAttribute('data-filter');
         renderCourses(container);
       });
+    });
+    var levelFilterSel = document.getElementById('courses-level-filter');
+    if (levelFilterSel) levelFilterSel.addEventListener('change', function () {
+      currentLevelFilter = levelFilterSel.value;
+      renderCourses(container);
     });
     var newBtn = document.getElementById('new-course-btn');
     if (newBtn) newBtn.addEventListener('click', function () { openCourseForm(null); });
@@ -94,20 +121,30 @@
         openCourseForm(App.Store.get('courses', btn.getAttribute('data-course-edit')));
       });
     });
+    container.querySelectorAll('[data-course-rename]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var course = App.Store.get('courses', btn.getAttribute('data-course-rename'));
+        if (course) openCourseRenameModal(course);
+      });
+    });
     container.querySelectorAll('[data-course-del]').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var course = App.Store.get('courses', btn.getAttribute('data-course-del'));
-        if (!course) return;
-        UI.confirmDialog('حذف الدورة', 'هل أنت متأكد من حذف دورة «' + course.name + '»؟ تُحذف الدورة فقط — جلساتها ومصاريفها تبقى في قاعدة البيانات ويمكن حذفها منفردة.',
-          function () {
-            window.TadreebDB.remove('courses', course.id).then(function () {
-              UI.toast('تم حذف الدورة', 'success');
-              App.refresh();
-            }).catch(UI.toastError);
-          });
+        if (course) requestDeleteCourse(course);
       });
     });
+
+    var statsBtn = document.getElementById('courses-stats-btn');
+    if (statsBtn) {
+      statsBtn.addEventListener('click', function () {
+        UI.setBtnLoading(statsBtn, true, 'جارٍ تجهيز الإحصائيات…');
+        App.buildCoursesStatsData().then(function (data) {
+          UI.callExport('exportCoursesStats', [data]);
+        }).catch(UI.toastError).finally(function () { UI.setBtnLoading(statsBtn, false); });
+      });
+    }
 
     var exportBtn = document.getElementById('courses-export-btn');
     if (exportBtn) {
@@ -122,7 +159,7 @@
             { id: 'trainees', label: 'عدد المتدربين', checked: true }
           ],
           scopeOptions: [
-            { id: 'filtered', label: 'العرض الحالي (' + (currentFilter === 'all' ? 'الكل' : UI.COURSE_STATUS_LABELS[currentFilter]) + ')' },
+            { id: 'filtered', label: 'العرض الحالي (' + (COMPLETION_FILTER_LABELS[currentFilter] || 'الكل') + ')' },
             { id: 'all', label: 'كل الدورات' }
           ],
           onConfirm: function (result) {
@@ -143,12 +180,73 @@
     }
   }
 
+  // إعادة تسمية سريعة: حقل واحد فقط (الاسم)، دون فتح نموذج التعديل الكامل.
+  function openCourseRenameModal(course) {
+    var fields = '<div class="field"><label>اسم الدورة</label>' +
+      '<input type="text" name="name" required value="' + UI.escapeHtml(course.name || '') + '"></div>';
+    UI.openFormModal('إعادة تسمية الدورة', fields, function (form, close, submitBtn) {
+      var input = form.querySelector('[name="name"]');
+      var name = input ? input.value.trim() : '';
+      if (!name) { UI.formError(form, 'اسم الدورة مطلوب'); return; }
+      if (name === course.name) { close(); return; }
+      UI.formError(form, '');
+      UI.setBtnLoading(submitBtn, true, 'جارٍ الحفظ…');
+      window.TadreebDB.update('courses', course.id, { name: name }).then(function () {
+        return window.TadreebDB.logAudit('course_rename', 'courses', course.id,
+          'إعادة تسمية الدورة من «' + course.name + '» إلى «' + name + '»');
+      }).then(function () {
+        close();
+        UI.toast('تمت إعادة تسمية الدورة', 'success');
+        App.refresh();
+      }).catch(function (err) {
+        UI.setBtnLoading(submitBtn, false);
+        UI.toastError(err);
+      });
+    });
+  }
+
+  // حذف الدورة مع قاعدة الحماية: أي حضور مسجل يمنع الحذف نهائياً.
+  // المعاينة أولاً (رسالة منع أو تأكيد بما سيُحذف)، ثم الحذف نفسه
+  // يعيد فحص الحماية على مستوى طبقة البيانات قبل أي كتابة.
+  function requestDeleteCourse(course) {
+    window.TadreebDB.courseDeletePreview(course.id).then(function (preview) {
+      if (preview.withAttendance > 0) {
+        UI.openModal({
+          title: 'لا يمكن حذف هذه الدورة',
+          bodyHTML: '<p>' + UI.escapeHtml('لا يمكن حذف هذه الدورة — تحتوي ' + preview.withAttendance +
+            ' جلسة على سجلات حضور. يمكنك إيقاف الدورة أو إلغاؤها بدلاً من ذلك.') + '</p>',
+          actions: [
+            {
+              label: 'تعديل الدورة',
+              onClick: function (close) { close(); openCourseForm(course); }
+            },
+            { label: 'إغلاق', className: 'btn-outline', closeOnClick: true }
+          ]
+        });
+        return;
+      }
+      UI.confirmDialog('حذف الدورة',
+        'سيتم حذف الدورة «' + course.name + '» و ' + preview.sessions + ' جلسة و ' + preview.expenses +
+        ' مصروف. لا يمكن التراجع.',
+        function () {
+          // حذف الدورة إجراء مدمّر — يتطلب تأكيد هوية المدير
+          // (المعاينة → التأكيد → إعادة المصادقة → الحذف).
+          UI.requireReauth(function () {
+            window.TadreebDB.deleteCourse(course.id).then(function () {
+              UI.toast('تم حذف الدورة', 'success');
+              App.refresh();
+            }).catch(UI.toastError);
+          });
+        });
+    }).catch(UI.toastError);
+  }
+
   // ================= نموذج الدورة (إنشاء / تعديل) =================
   function trainerOptionsHtml(selectedId) {
     var html = '<option value="">بدون مدرب حالياً</option>';
     App.Store.getAll('trainers').forEach(function (t) {
       html += '<option value="' + UI.escapeHtml(t.id) + '"' +
-        (t.id === selectedId ? ' selected' : '') + '>' + UI.escapeHtml(t.name) + '</option>';
+        (t.id === selectedId ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(t, 'trainers') + ' — ' + t.name) + '</option>';
     });
     html += '<option value="__new__">إضافة مدرب جديد…</option>';
     return html;
@@ -159,9 +257,113 @@
     var html = '<option value="">اختر الفترة</option>';
     periods.forEach(function (p) {
       html += '<option value="' + UI.escapeHtml(p.id) + '"' + (p.id === selectedId ? ' selected' : '') + '>' +
-        UI.escapeHtml(p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
+        UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
     });
     return html;
+  }
+
+  // خيارات المجموعة: «المعرّف — الاسم — المديرية»؛ آمنة مع قائمة مجموعات فارغة.
+  function groupOptionsHtml(selectedId) {
+    var groups = App.Store.getAll('groups').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    });
+    var html = '<option value="">بدون مجموعة</option>';
+    groups.forEach(function (g) {
+      var dn = App.directorateName(g.directorateId);
+      html += '<option value="' + UI.escapeHtml(g.id) + '"' + (g.id === selectedId ? ' selected' : '') + '>' +
+        UI.escapeHtml(App.displayCode(g, 'groups') + ' — ' + g.name + (dn ? ' — ' + dn : '')) + '</option>';
+    });
+    return html;
+  }
+
+  // خيارات المديرية المعيّنة (حقل منفرد، غير خانات المديريات المتعددة).
+  function assignedDirectorateOptionsHtml(selectedId) {
+    var dirs = App.Store.getAll('directorates').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    });
+    var html = '<option value="">بدون مديرية معيّنة</option>';
+    dirs.forEach(function (d) {
+      html += '<option value="' + UI.escapeHtml(d.id) + '"' + (d.id === selectedId ? ' selected' : '') + '>' +
+        UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
+    });
+    return html;
+  }
+
+  // خيارات المستوى: الافتراضية أولاً (بترتيب ثابت من App.LEVEL_LABELS)،
+  // ثم المخصصة من المتجر مرتبة بالاسم. تُقرأ من المتجر الحي عند كل
+  // فتح للنموذج، فتبقى محدَّثة دون إعادة تحميل.
+  function levelOptionsHtml(selectedLevel) {
+    var sel = selectedLevel || 'none';
+    var html = '';
+    Object.keys(App.LEVEL_LABELS).forEach(function (key) {
+      html += '<option value="' + key + '"' + (key === sel ? ' selected' : '') + '>' +
+        UI.escapeHtml(App.LEVEL_LABELS[key]) + '</option>';
+    });
+    App.Store.getAll('levels').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    }).forEach(function (l) {
+      html += '<option value="' + UI.escapeHtml(l.id) + '"' + (l.id === sel ? ' selected' : '') + '>' +
+        UI.escapeHtml(l.name) + '</option>';
+    });
+    return html;
+  }
+
+  // خيارات فلتر المستوى في قائمة الدورات (بلا خيار «كل المستويات» —
+  // يُبنى في renderCourses)؛ المحدد هو currentLevelFilter الحالي.
+  function levelFilterOptionsHtml() {
+    var html = '';
+    Object.keys(App.LEVEL_LABELS).forEach(function (key) {
+      html += '<option value="' + key + '"' + (currentLevelFilter === key ? ' selected' : '') + '>' +
+        UI.escapeHtml(App.LEVEL_LABELS[key]) + '</option>';
+    });
+    App.Store.getAll('levels').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    }).forEach(function (l) {
+      html += '<option value="' + UI.escapeHtml(l.id) + '"' + (currentLevelFilter === l.id ? ' selected' : '') + '>' +
+        UI.escapeHtml(l.name) + '</option>';
+    });
+    return html;
+  }
+
+  // خيارات قاعة اليوم في الخطة الأسبوعية: «تلقائي» (قيمة فارغة) أولاً.
+  function hallOptionsHtml(selectedId) {
+    var halls = App.Store.getAll('halls').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    });
+    var html = '<option value="">تلقائي (أول قاعة حرة)</option>';
+    halls.forEach(function (h) {
+      html += '<option value="' + UI.escapeHtml(h.id) + '"' + (h.id === selectedId ? ' selected' : '') + '>' +
+        UI.escapeHtml(h.name) + '</option>';
+    });
+    return html;
+  }
+
+  // عرض الخطة الأسبوعية في تفاصيل الدورة (مربع وصفي إضافي).
+  // الدورات القديمة بلا dayPlan تُرجع '' فلا يظهر شيء إضافي.
+  function dayPlanMetaHtml(course) {
+    if (!course || !course.dayPlan) return '';
+    var days = (course.days || []).slice().sort(function (a, b) { return a - b; });
+    var parts = [];
+    days.forEach(function (d) {
+      var e = course.dayPlan[d];
+      if (!e) return;
+      var p = e.periodId ? App.Store.get('periods', e.periodId) : null;
+      var h = e.hallId ? App.hallName(e.hallId) : '';
+      parts.push(UI.escapeHtml(UI.WEEKDAYS[d]) + ': ' +
+        UI.escapeHtml(p ? p.label : '—') + ' — ' + UI.escapeHtml(h || 'تلقائي'));
+    });
+    if (!parts.length) return '';
+    return '<div class="meta-box"><div class="k">الخطة الأسبوعية</div><div class="v">' +
+      parts.join(' · ') + '</div></div>';
+  }
+
+  // تسمية مجموعة الدورة: «الاسم — المديرية»، أو '' عند غياب المجموعة.
+  function courseGroupLabel(course) {
+    if (!course || !course.groupId) return '';
+    var g = App.Store.get('groups', course.groupId);
+    if (!g) return '';
+    var dn = App.directorateName(g.directorateId);
+    return g.name + (dn ? ' — ' + dn : '');
   }
 
   function openCourseForm(course) {
@@ -182,12 +384,12 @@
       return '<label class="check-row" data-trainee-row="' + UI.escapeHtml(t.name) + '">' +
         '<input type="checkbox" data-trainee-id="' + UI.escapeHtml(t.id) + '"' +
         (selectedTrainees.has(t.id) ? ' checked' : '') + '> ' + UI.escapeHtml(t.name) +
-        ' <span class="muted">(' + UI.escapeHtml(App.directorateName(t.directorateId) || 'بلا مديرية') + ')</span></label>';
+        ' <span class="muted">(' + UI.escapeHtml(App.displayCode(t, 'trainees')) + ' · ' + UI.escapeHtml(App.directorateName(t.directorateId) || 'بلا مديرية') + ')</span></label>';
     }).join('');
 
     var dirRows = directorates.map(function (d) {
       return '<label class="check-row"><input type="checkbox" data-dir-id="' + UI.escapeHtml(d.id) + '"' +
-        (selectedDirectorates.has(d.id) ? ' checked' : '') + '> ' + UI.escapeHtml(d.name) + '</label>';
+        (selectedDirectorates.has(d.id) ? ' checked' : '') + '> ' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</label>';
     }).join('');
 
     var dayBoxes = UI.WEEKDAYS.map(function (name, i) {
@@ -198,11 +400,20 @@
     var fields = '<div class="form-grid">' +
       '<div class="field field-full"><label>اسم الدورة *</label>' +
       '<input type="text" name="name" required value="' + UI.escapeHtml(course ? course.name : '') + '" placeholder="مثال: دورة إكسل"></div>' +
+      '<div class="field"><label>المعرّف *</label>' +
+      '<input type="text" name="code" required value="' + UI.escapeHtml(course ? (course.code || App.displayCode(course, 'courses')) : App.nextCode('courses')) + '"></div>' +
       '<div class="field"><label>المدرب</label><select name="trainerId">' + trainerOptionsHtml(course ? course.trainerId : null) + '</select>' +
       '<div class="field-hint">يمكن إنشاء الدورة بدون مدرب والتعاقد معه لاحقاً.</div></div>' +
+      '<div class="field"><label>المجموعة</label><select name="groupId">' + groupOptionsHtml(course ? course.groupId : null) + '</select></div>' +
+      '<div class="field"><label>المديرية المعيّنة</label><select name="directorateId">' + assignedDirectorateOptionsHtml(course ? course.directorateId : null) + '</select>' +
+      '<div class="field-hint">تُملأ تلقائياً عند اختيار مجموعة، ويمكن تغييرها يدوياً.</div></div>' +
+      '<div class="field"><label>المستوى</label><select name="level">' + levelOptionsHtml(course ? course.level : 'none') + '</select>' +
+      '<div class="field-hint">المستويات المخصصة تُدار من إعدادات المنصة.</div></div>' +
       '<div class="field"><label>الفترة التدريبية *</label><select name="periodId" required>' + periodOptionsHtml(course ? course.periodId : null) + '</select></div>' +
       '<div class="field"><label>عدد الجلسات *</label><input type="number" name="sessionCount" min="1" max="200" required value="' +
       UI.escapeHtml(course ? course.sessionCount : 20) + '"></div>' +
+      '<div class="field"><label>تاريخ بدء الدورة</label><input type="date" name="startDate" value="' +
+      UI.escapeHtml(isEdit ? (course.startDate || '') : UI.todayStr()) + '"></div>' +
       '<div class="field"><label>ميزانية الدورة (ل.س)</label><input type="number" name="budget" min="0" step="1" value="' +
       UI.escapeHtml(course ? (course.budget || 0) : 0) + '"></div>' +
       (isEdit ? '<div class="field"><label>حالة الدورة</label><select name="status">' +
@@ -214,16 +425,20 @@
         '<option value="3">3 أسابيع</option><option value="4">4 أسابيع</option></select>' +
         '<div class="field-hint">يُنشئ الجلسات أسبوعاً بعد أسبوع ويتخطى العطل تلقائياً.</div></div>' : '') +
       '<div class="field field-full"><label>أيام الدورة الأسبوعية *</label><div class="day-picker">' + dayBoxes + '</div></div>' +
+      '<div class="field field-full"><label>الخطة الأسبوعية</label><div id="cf-dayplan"></div>' +
+      '<div class="field-hint">فترة وقاعة مستقلتان لكل يوم؛ «تلقائي» يعني أول قاعة حرة في ذلك اليوم. تغيير الفترة الرئيسية يعيد ضبط خطة كل الأيام.' +
+      (isEdit ? ' تُطبَّق الخطة على الجلسات الجديدة عند إعادة توليد الجدول — الجلسات الحالية لا تتغير.' : '') + '</div></div>' +
       '<div class="field field-full"><label>المديريات</label>' +
       (dirRows ? '<div class="check-list">' + dirRows + '</div>' : '<div class="muted">لا مديريات مسجلة — أضف مديرية من الدليل أولاً.</div>') + '</div>' +
       '<div class="field field-full"><label>المتدربون</label>' +
+      '<div class="field-hint" id="cf-group-trainee-hint" hidden></div>' +
       '<input type="text" class="check-list-search" id="cf-trainee-search" placeholder="ابحث بالاسم…">' +
       (traineeRows ? '<div class="check-list" id="cf-trainee-list">' + traineeRows + '</div>' :
         '<div class="muted">لا متدربين مسجلين — أضف متدرباً جديداً أدناه.</div>') +
       '<div class="inline-add"><h3>إضافة متدرب جديد</h3><div class="form-grid">' +
       '<div class="field"><label>الاسم</label><input type="text" name="newTraineeName" placeholder="اسم المتدرب"></div>' +
       '<div class="field"><label>المديرية</label><select name="newTraineeDirectorate"><option value="">اختر المديرية</option>' +
-      directorates.map(function (d) { return '<option value="' + UI.escapeHtml(d.id) + '">' + UI.escapeHtml(d.name) + '</option>'; }).join('') + '</select></div>' +
+      directorates.map(function (d) { return '<option value="' + UI.escapeHtml(d.id) + '">' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>'; }).join('') + '</select></div>' +
       '<div class="field"><label>رقم الهاتف</label><input type="text" name="newTraineePhone" placeholder="رقم الهاتف"></div>' +
       '<div class="field"><label>ملاحظات</label><input type="text" name="newTraineeNotes" placeholder="ملاحظات أخرى (اختياري)"></div>' +
       '</div><div class="field-hint">إن كتبت اسماً هنا، سيُضاف المتدرب الجديد إلى الدورة تلقائياً.</div></div>' +
@@ -248,6 +463,42 @@
         newTrainerBox.hidden = trainerSelect.value !== '__new__';
       });
     }
+    // اختيار مجموعة يملأ المديرية المعيّنة تلقائياً (دون قفل الحقل)،
+    // ويعطّل قائمة متدربي الدورة — فأعضاء المجموعة هم من يُستخدمون
+    // في التفقد والتصدير. قائمة الدورة المخزنة لا تُمسح أبداً (تبقى
+    // احتياطاً إن فُرغت المجموعة أو حُذفت).
+    var groupSelect = card.querySelector('select[name="groupId"]');
+    var assignedDirSelect = card.querySelector('select[name="directorateId"]');
+    if (groupSelect && assignedDirSelect) {
+      var cfTraineeList = card.querySelector('#cf-trainee-list');
+      var cfTraineeSearch = card.querySelector('#cf-trainee-search');
+      var cfGroupHint = card.querySelector('#cf-group-trainee-hint');
+      var syncGroupTrainees = function () {
+        var g = groupSelect.value ? App.Store.get('groups', groupSelect.value) : null;
+        var grouped = !!g;
+        if (cfTraineeList) {
+          cfTraineeList.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.disabled = grouped; });
+          cfTraineeList.style.opacity = grouped ? '0.5' : '';
+        }
+        if (cfTraineeSearch) cfTraineeSearch.disabled = grouped;
+        if (cfGroupHint) {
+          if (grouped) {
+            var n = (g.traineeIds || []).length;
+            cfGroupHint.textContent = 'هذه الدورة معيّنة لمجموعة — سيُستخدم أعضاء المجموعة في التفقد والتصدير' +
+              (n ? ' (' + n + ' عضواً)' : '');
+            cfGroupHint.hidden = false;
+          } else {
+            cfGroupHint.hidden = true;
+          }
+        }
+      };
+      groupSelect.addEventListener('change', function () {
+        var g = groupSelect.value ? App.Store.get('groups', groupSelect.value) : null;
+        if (g && g.directorateId) assignedDirSelect.value = g.directorateId;
+        syncGroupTrainees();
+      });
+      syncGroupTrainees();
+    }
     var search = card.querySelector('#cf-trainee-search');
     var list = card.querySelector('#cf-trainee-list');
     if (search && list) {
@@ -263,14 +514,85 @@
         cb.closest('.day-chip').classList.toggle('checked', cb.checked);
       });
     });
+
+    // الخطة الأسبوعية: فترة وقاعة لكل يوم مختار (v1.1).
+    // dayPlanState يحفظ تعديلات المستخدم أثناء إعادة الرسم؛ تغيير
+    // الفترة الرئيسية يعيد ضبط فترة كل الأيام إلى قيمتها الجديدة.
+    var dayPlanState = {};
+    if (course && course.dayPlan) {
+      Object.keys(course.dayPlan).forEach(function (k) {
+        var e = course.dayPlan[k];
+        if (e) dayPlanState[k] = { periodId: e.periodId || '', hallId: e.hallId || null };
+      });
+    }
+    var dayPlanEl = card.querySelector('#cf-dayplan');
+    var mainPeriodSel = card.querySelector('select[name="periodId"]');
+    function dayPlanDays() {
+      var out = [];
+      card.querySelectorAll('[data-day]:checked').forEach(function (cb) {
+        out.push(parseInt(cb.getAttribute('data-day'), 10));
+      });
+      return out.sort(function (a, b) { return a - b; });
+    }
+    function renderDayPlan() {
+      if (!dayPlanEl) return;
+      var days = dayPlanDays();
+      if (!days.length) {
+        dayPlanEl.innerHTML = '<div class="muted">اختر يوماً واحداً على الأقل لتعيين خطته.</div>';
+        return;
+      }
+      var html = '';
+      days.forEach(function (d) {
+        var cur = dayPlanState[d] || { periodId: mainPeriodSel ? mainPeriodSel.value : '', hallId: null };
+        html += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' +
+          '<span style="min-width:64px;font-weight:600">' + UI.escapeHtml(UI.WEEKDAYS[d]) + '</span>' +
+          '<select data-dayplan-period="' + d + '" style="flex:1;width:auto;min-width:0;padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px">' +
+          periodOptionsHtml(cur.periodId || (mainPeriodSel ? mainPeriodSel.value : null)) + '</select>' +
+          '<select data-dayplan-hall="' + d + '" style="flex:1;width:auto;min-width:0;padding:10px 12px;border:1px solid #CBD5E1;border-radius:8px">' +
+          hallOptionsHtml(cur.hallId) + '</select></div>';
+      });
+      dayPlanEl.innerHTML = html;
+    }
+    if (dayPlanEl) {
+      dayPlanEl.addEventListener('change', function (e) {
+        var t = e.target;
+        var d = t.getAttribute('data-dayplan-period');
+        var isPeriod = d != null;
+        if (!isPeriod) d = t.getAttribute('data-dayplan-hall');
+        if (d == null) return;
+        if (!dayPlanState[d]) {
+          dayPlanState[d] = { periodId: mainPeriodSel ? mainPeriodSel.value : '', hallId: null };
+        }
+        if (isPeriod) dayPlanState[d].periodId = t.value;
+        else dayPlanState[d].hallId = t.value || null;
+      });
+    }
+    card.querySelectorAll('.day-chip input').forEach(function (cb) {
+      cb.addEventListener('change', renderDayPlan);
+    });
+    if (mainPeriodSel) {
+      mainPeriodSel.addEventListener('change', function () {
+        Object.keys(dayPlanState).forEach(function (k) { dayPlanState[k].periodId = mainPeriodSel.value; });
+        renderDayPlan();
+      });
+    }
+    renderDayPlan();
   }
 
   function submitCourseForm(form, close, submitBtn, course, isEdit) {
     var name = form.querySelector('[name="name"]').value.trim();
+    var code = form.querySelector('[name="code"]').value.trim();
     var periodId = form.querySelector('[name="periodId"]').value;
     var sessionCount = parseInt(form.querySelector('[name="sessionCount"]').value, 10);
     var budget = parseInt(form.querySelector('[name="budget"]').value, 10) || 0;
+    var startDateRaw = form.querySelector('[name="startDate"]').value;
+    // عند الإنشاء: اليوم افتراضياً. عند التعديل: حقل فارغ يعني «أبقِ التاريخ
+    // الحالي» — الدورات القديمة بلا startDate لا تُعاد جدولتها لمجرد فتح التعديل.
+    var startDate = startDateRaw || (isEdit ? (course.startDate || '') : UI.todayStr());
     var trainerSel = form.querySelector('[name="trainerId"]').value;
+    var groupId = form.querySelector('[name="groupId"]').value || null;
+    var directorateId = form.querySelector('[name="directorateId"]').value || null;
+    var level = form.querySelector('[name="level"]').value || 'none';
 
     var days = [];
     form.querySelectorAll('[data-day]:checked').forEach(function (cb) { days.push(parseInt(cb.getAttribute('data-day'), 10)); });
@@ -279,7 +601,25 @@
     var directorateIds = [];
     form.querySelectorAll('[data-dir-id]:checked').forEach(function (cb) { directorateIds.push(cb.getAttribute('data-dir-id')); });
 
+    // الخطة الأسبوعية (v1.1): فترة وقاعة لكل يوم؛ القاعة الفارغة تعني
+    // «تلقائي» (أول قاعة حرة)، والفترة الفارغة تعني الفترة الرئيسية.
+    // تُسجَّل دائماً (حتى الافتراضيات) ليكون التوليد صريحاً.
+    var dayPlan = {};
+    form.querySelectorAll('[data-dayplan-period]').forEach(function (sel) {
+      var d = sel.getAttribute('data-dayplan-period');
+      var hallSel = form.querySelector('[data-dayplan-hall="' + d + '"]');
+      dayPlan[d] = {
+        periodId: sel.value || periodId,
+        hallId: hallSel && hallSel.value ? hallSel.value : null
+      };
+    });
+
     if (!name) { UI.formError(form, 'اسم الدورة مطلوب'); return; }
+    if (!code) { UI.formError(form, 'المعرّف مطلوب'); return; }
+    if (!App.isCodeUnique('courses', code, isEdit ? course.id : null)) {
+      UI.formError(form, 'هذا المعرّف مستخدم من قبل — اختر معرّفاً آخر');
+      return;
+    }
     if (!periodId) { UI.formError(form, 'اختر الفترة التدريبية'); return; }
     if (!sessionCount || sessionCount < 1) { UI.formError(form, 'عدد الجلسات غير صالح'); return; }
     if (!days.length) { UI.formError(form, 'اختر يوماً واحداً على الأقل من أيام الأسبوع'); return; }
@@ -301,6 +641,7 @@
       chain = chain.then(function (ctx) {
         return window.TadreebDB.add('trainers', {
           name: newTrainerName,
+          code: App.nextCode('trainers'),
           specialty: form.querySelector('[name="newTrainerSpecialty"]').value.trim(),
           phone: form.querySelector('[name="newTrainerPhone"]').value.trim()
         }).then(function (id) { ctx.trainerId = id; return ctx; });
@@ -310,6 +651,7 @@
       chain = chain.then(function (ctx) {
         return window.TadreebDB.add('trainees', {
           name: newTraineeName,
+          code: App.nextCode('trainees'),
           directorateId: form.querySelector('[name="newTraineeDirectorate"]').value || null,
           phone: form.querySelector('[name="newTraineePhone"]').value.trim(),
           notes: form.querySelector('[name="newTraineeNotes"]').value.trim(),
@@ -321,16 +663,40 @@
     chain.then(function (ctx) {
       var data = {
         name: name,
+        code: code,
+        level: level,
         trainerId: ctx.trainerId,
+        groupId: groupId,
+        directorateId: directorateId,
         traineeIds: traineeIds,
         directorateIds: directorateIds,
         days: days,
+        dayPlan: dayPlan,
         periodId: periodId,
         sessionCount: sessionCount,
-        budget: budget
+        budget: budget,
+        startDate: startDate || null
       };
       if (isEdit) {
         data.status = form.querySelector('[name="status"]').value;
+        var oldStartDate = course.startDate || '';
+        if (startDate !== oldStartDate) {
+          // تاريخ بدء جديد: تُحفظ كل التعديلات (ومنها التاريخ الجديد)
+          // أولاً، ثم تُعرض نافذة تأكيد إعادة التوليد — والإلغاء يعيد
+          // تاريخ البدء القديم فقط، وتبقى باقي التعديلات محفوظة.
+          return window.TadreebDB.update('courses', course.id, data).then(function () {
+            return window.TadreebDB.rescheduleCoursePreview(course.id, startDate);
+          }).then(function (preview) {
+            UI.setBtnLoading(submitBtn, false);
+            openRescheduleConfirm(course, startDate, oldStartDate, preview, close);
+            return { courseId: course.id, reschedulePending: true };
+          }).catch(function (err) {
+            // فشل الحفظ أو المعاينة: إعادة تاريخ البدء القديم ثم إظهار الخطأ.
+            return window.TadreebDB.update('courses', course.id, { startDate: oldStartDate || null }).then(function () {
+              throw err;
+            }, function () { throw err; });
+          });
+        }
         return window.TadreebDB.update('courses', course.id, data).then(function () {
           return { courseId: course.id, edited: true };
         });
@@ -341,6 +707,7 @@
         return { courseId: id, edited: false };
       });
     }).then(function (res) {
+      if (res.reschedulePending) return; // نافذة التأكيد تتولى الباقي
       if (res.edited) {
         UI.setBtnLoading(submitBtn, false);
         close();
@@ -349,7 +716,7 @@
       }
       // توليد الجدول للدورة الجديدة
       var weeks = parseInt(form.querySelector('[name="weeks"]').value, 10) || 2;
-      return window.TadreebDB.generateSchedule(res.courseId, weeks).then(function (result) {
+      return window.TadreebDB.generateSchedule(res.courseId, weeks, startDate).then(function (result) {
         UI.setBtnLoading(submitBtn, false);
         close();
         UI.toast('تم إنشاء الدورة وتوليد الجدول', 'success');
@@ -368,6 +735,59 @@
     }).catch(function (err) {
       UI.setBtnLoading(submitBtn, false);
       UI.formError(form, err && err.message ? err.message : 'تعذّر حفظ الدورة');
+    });
+  }
+
+  // نافذة تأكيد تغيير تاريخ بدء الدورة. تُبنى عبر UI.openModal (وليس
+  // UI.confirmDialog) لأن زر الإلغاء يحتاج إجراءً — إعادة تاريخ البدء
+  // القديم — وconfirmDialog لا يقبل ردّاً عند الإلغاء. الشكل والزرّان
+  // مطابقان لنافذة التأكيد المعتادة. الإغلاق بلا اختيار (✕ أو Escape أو
+  // النقر خارج النافذة) يُعامل كإلغاء عبر onClose، فلا يبقى التاريخ الجديد
+  // محفوظاً بلا إعادة توليد.
+  function openRescheduleConfirm(course, newStartDate, oldStartDate, preview, closeForm) {
+    var settled = false;
+    UI.openModal({
+      title: 'تغيير تاريخ بدء الدورة',
+      bodyHTML: '<p>سيتم تغيير تاريخ بدء الدورة إلى ' + UI.escapeHtml(UI.fmtDate(newStartDate)) +
+        '. سيتم الاحتفاظ بـ ' + preview.kept + ' جلسة (لها حضور أو ملاحظات أو مكتملة) في مواعيدها، وحذف ' +
+        preview.removed + ' جلسة مجدولة وإعادة توليدها من التاريخ الجديد. هل أنت متأكد؟</p>',
+      actions: [
+        {
+          label: 'تأكيد',
+          className: 'btn-danger-solid',
+          onClick: function (close) {
+            settled = true;
+            close();
+            closeForm();
+            UI.toast('جارٍ إعادة توليد الجدول…');
+            window.TadreebDB.rescheduleCourse(course.id, newStartDate).then(function (result) {
+              UI.toast('تم تغيير تاريخ بدء الدورة وإعادة توليد ' + result.created + ' جلسة', 'success');
+              App.refresh();
+            }).catch(UI.toastError);
+          }
+        },
+        {
+          label: 'إلغاء',
+          className: 'btn-outline',
+          onClick: function (close) {
+            settled = true;
+            close();
+            closeForm();
+            window.TadreebDB.update('courses', course.id, { startDate: oldStartDate || null }).then(function () {
+              UI.toast('تم إلغاء تغيير تاريخ البدء', 'success');
+              App.refresh();
+            }).catch(UI.toastError);
+          }
+        }
+      ],
+      onClose: function () {
+        if (settled) return;
+        closeForm();
+        window.TadreebDB.update('courses', course.id, { startDate: oldStartDate || null }).then(function () {
+          UI.toast('تم إلغاء تغيير تاريخ البدء', 'success');
+          App.refresh();
+        }).catch(UI.toastError);
+      }
     });
   }
 
@@ -456,17 +876,41 @@
           UI.fmtMoney(feeDue) + ' (' + hours + ' ساعة)';
       }
     }
+    // المديرية المعيّنة أولاً (بخط عريض)، ثم المديريات الإضافية؛ الدورات القديمة بلا مديرية معيّنة تُعرض كما قبل.
+    var assignedDirName = course.directorateId ? App.directorateName(course.directorateId) : '';
+    var extraDirNames = (course.directorateIds || []).filter(function (id) { return id !== course.directorateId; })
+      .map(App.directorateName).filter(Boolean);
+    var dirsHtml = '';
+    if (assignedDirName) dirsHtml += '<strong>' + UI.escapeHtml(assignedDirName) + '</strong>';
+    if (extraDirNames.length) {
+      if (dirsHtml) dirsHtml += ' · ';
+      dirsHtml += UI.escapeHtml(extraDirNames.join(' · '));
+    }
+    if (!dirsHtml) dirsHtml = '—';
+    // تاريخ البدء: الحقل الجديد، وإلا تاريخ أول جلسة (الجلسات مرتبة
+    // حسب التاريخ)، وإلا «—» — الدورات القديمة بلا حقل startDate.
+    var startLabel = course.startDate ? UI.fmtDate(course.startDate) : '';
+    if (!startLabel && sessions.length) startLabel = UI.fmtDate(sessions[0].date);
+    if (!startLabel) startLabel = '—';
     html += '<div class="meta-grid">' +
+      '<div class="meta-box"><div class="k">المعرّف</div><div class="v">' +
+      UI.escapeHtml(App.displayCode(course, 'courses')) + '</div></div>' +
+      '<div class="meta-box"><div class="k">المستوى</div><div class="v">' +
+      UI.escapeHtml(App.levelName(course.level)) + '</div></div>' +
       '<div class="meta-box"><div class="k">المدرب</div><div class="v">' +
       UI.escapeHtml(trainer ? trainer.name : 'بدون مدرب حالياً') + '</div>' +
       (contractHtml ? '<div class="muted" style="font-size:12px;line-height:1.6">' + contractHtml + '</div>' : '') +
       (canWrite ? '<div style="margin-top:8px"><button class="link-btn" type="button" id="cd-contract-btn">' +
         (trainer ? 'تغيير المدرب / العقد' : 'تعاقد مع مدرب') + '</button></div>' : '') + '</div>' +
+      '<div class="meta-box"><div class="k">المجموعة</div><div class="v">' +
+      UI.escapeHtml(courseGroupLabel(course) || 'بلا مجموعة') + '</div></div>' +
+      '<div class="meta-box"><div class="k">تاريخ البدء</div><div class="v">' +
+      UI.escapeHtml(startLabel) + '</div></div>' +
       '<div class="meta-box"><div class="k">الفترة</div><div class="v">' + UI.escapeHtml(period ? period.label : '—') + '</div></div>' +
       '<div class="meta-box"><div class="k">الأيام</div><div class="v">' + UI.escapeHtml(UI.daysLabel(course.days)) + '</div></div>' +
       '<div class="meta-box"><div class="k">الوقت</div><div class="v">' + (period ? UI.fmtTimeRange(period.start, period.end) : '—') + '</div></div>' +
-      '<div class="meta-box"><div class="k">المديريات</div><div class="v">' +
-      UI.escapeHtml((course.directorateIds || []).map(App.directorateName).filter(Boolean).join(' · ') || '—') + '</div></div>' +
+      '<div class="meta-box"><div class="k">المديريات</div><div class="v">' + dirsHtml + '</div></div>' +
+      dayPlanMetaHtml(course) +
       '</div>';
 
     // التقدم
@@ -493,7 +937,7 @@
         var sp = Store.get('periods', s.periodId);
         var isSel = selectedSession && selectedSession.id === s.id;
         html += '<tr class="clickable' + (isSel ? ' selected-row' : '') + (detailState.mergeFromId === s.id ? ' merge-pick' : '') +
-          '" data-session-row="' + UI.escapeHtml(s.id) + '"><td>' + (i + 1) + '</td>' +
+          '" data-session-row="' + UI.escapeHtml(s.id) + '"><td><strong>' + UI.escapeHtml(App.sessionLabel(s, course)) + '</strong></td>' +
           '<td>' + UI.escapeHtml(UI.fmtDateShort(s.date)) + '</td>' +
           '<td>' + UI.escapeHtml(UI.fmtWeekday(s.date)) + '</td>' +
           '<td>' + (sp ? UI.fmtTimeRange(sp.start, sp.end) : '') + '</td>' +
@@ -521,10 +965,19 @@
       (selectedSession ? '<button class="btn btn-outline btn-sm" type="button" id="cd-att-export-btn">تصدير الحضور ↓</button>' : '') +
       '</div><div id="cd-attendance-body">' + UI.loadingState('جارٍ تحميل الحضور…') + '</div></div>';
 
-    // المتدربون
-    html += '<div class="card"><h2>المتدربون (' + trainees.length + ')</h2>';
+    // المتدربون — مصدر القائمة: أعضاء المجموعة إن كانت الدورة معيّنة
+    // لمجموعة لها أعضاء، وإلا قائمة الدورة نفسها (انظر App.courseTrainees).
+    var detailGroup = course.groupId ? Store.get('groups', course.groupId) : null;
+    var detailGrouped = detailGroup && (detailGroup.traineeIds || []).length > 0;
+    var traineesSource = detailGrouped
+      ? 'المتدربون: أعضاء المجموعة «' + detailGroup.name + '» (' + trainees.length + ')'
+      : 'المتدربون: قائمة الدورة (' + trainees.length + ')';
+    html += '<div class="card"><h2>المتدربون (' + trainees.length + ')</h2>' +
+      '<div class="muted" style="margin-bottom:10px">' + UI.escapeHtml(traineesSource) + '</div>';
     if (!trainees.length) {
-      html += '<div class="muted">لا متدربين في هذه الدورة بعد — أضفهم من تعديل الدورة.</div>';
+      html += '<div class="muted">' + (course.groupId ?
+        'لا متدربين في هذه الدورة بعد — أضف أعضاء إلى المجموعة من الدليل.' :
+        'لا متدربين في هذه الدورة بعد — أضفهم من تعديل الدورة.') + '</div>';
     } else {
       html += '<div class="table-wrap"><table><thead><tr><th>المتدرب</th><th>المديرية</th><th>رقم الهاتف</th><th>الحالة</th><th>ملاحظات</th>' +
         (canWrite ? '<th>إجراءات</th>' : '') + '</tr></thead><tbody>';
@@ -540,9 +993,11 @@
             }).join('') + '</select>' : UI.pillForTraineeStatus(t.status)) + '</td>' +
           '<td>' + UI.escapeHtml(t.notes || '') + '</td>';
         if (canWrite) {
+          // الدورة المجمّعة: أعضاؤها يُدارون من المجموعة، لا من هنا.
           html += '<td><div class="row-actions">' +
             '<button class="link-btn" type="button" data-trainee-notes="' + UI.escapeHtml(t.id) + '">ملاحظات</button>' +
-            '<button class="link-btn danger" type="button" data-trainee-remove="' + UI.escapeHtml(t.id) + '">إزالة من الدورة</button>' +
+            (detailGrouped ? '' :
+              '<button class="link-btn danger" type="button" data-trainee-remove="' + UI.escapeHtml(t.id) + '">إزالة من الدورة</button>') +
             '</div></td>';
         }
         html += '</tr>';
@@ -657,8 +1112,21 @@
             });
           return;
         }
-        detailState.selectedSessionId = id;
-        App.renderScreen('course-detail', { courseId: courseId });
+        if (window.SessionScreen && typeof window.SessionScreen.openActionSheet === 'function') {
+          window.SessionScreen.openActionSheet(id, {
+            onCheck: function (sid) {
+              detailState.selectedSessionId = sid;
+              App.renderScreen('course-detail', { courseId: courseId });
+              setTimeout(function () {
+                var card = document.getElementById('cd-attendance-card');
+                if (card) card.scrollIntoView();
+              }, 100);
+            }
+          });
+        } else {
+          detailState.selectedSessionId = id;
+          App.renderScreen('course-detail', { courseId: courseId });
+        }
       });
     });
     container.querySelectorAll('[data-sess-state]').forEach(function (btn) {
@@ -813,10 +1281,58 @@
     });
     var attExpBtn = document.getElementById('cd-att-export-btn');
     if (attExpBtn) attExpBtn.addEventListener('click', function () {
-      if (!selectedSession) return;
-      App.buildAttendanceData(selectedSession.id).then(function (data) {
-        UI.callExport('exportAttendance', [data]);
-      }).catch(UI.toastError);
+      UI.openPicker({
+        title: 'تصدير الحضور والغياب',
+        scopeOptions: [
+          { id: 'one', label: 'جلسة واحدة (الجلسة المحددة)' },
+          { id: 'selected', label: 'جلسات محددة' },
+          { id: 'all', label: 'كل جلسات الدورة' }
+        ],
+        onConfirm: function (result) {
+          var scope = result && result.scope;
+          if (scope === 'one') {
+            if (!selectedSession) {
+              UI.toast('لا توجد جلسة محددة للتصدير', 'error');
+              return;
+            }
+            runAttendanceReport([selectedSession.id]);
+          } else if (scope === 'all') {
+            runAttendanceReport(App.sessionsForCourse(courseId).map(function (s) { return s.id; }));
+          } else if (scope === 'selected') {
+            openSessionPicker();
+          }
+        }
+      });
+
+      function runAttendanceReport(sessionIds) {
+        UI.toast('جارٍ تجهيز التقرير…');
+        App.buildAttendanceReportData(courseId, sessionIds).then(function (data) {
+          UI.callExport('exportAttendanceReport', [data]);
+        }).catch(UI.toastError);
+      }
+
+      function openSessionPicker() {
+        var allSessions = App.sessionsForCourse(courseId);
+        var fields = allSessions.map(function (s) {
+          var checked = selectedSession && s.id === selectedSession.id ? ' checked' : '';
+          var label = UI.escapeHtml(UI.fmtDateFull(s.date)) + ' · ' +
+            UI.escapeHtml(App.periodLabel(s.periodId)) + ' · ' +
+            UI.escapeHtml(UI.SESSION_STATE_LABELS[s.state] || s.state || '');
+          return '<label class="tadreeb-export-check"><input type="checkbox" name="session" value="' +
+            UI.escapeHtml(s.id) + '"' + checked + '> ' + label + '</label>';
+        }).join('');
+        if (!allSessions.length) fields = '<div class="muted">لا توجد جلسات في هذه الدورة بعد.</div>';
+        UI.openFormModal('اختر الجلسات', fields, function (form, close) {
+          var picked = Array.prototype.slice.call(form.querySelectorAll('input[name="session"]:checked'))
+            .map(function (el) { return el.value; });
+          if (!picked.length) {
+            UI.formError(form, 'اختر جلسة واحدة على الأقل');
+            return;
+          }
+          close();
+          runAttendanceReport(picked);
+        }, { submitLabel: 'تصدير' });
+      }
     });
 
     // حضور الجلسة المحددة (مكوّن مشترك)
@@ -882,6 +1398,7 @@
       if (trainerSel === '__new__') {
         chain = window.TadreebDB.add('trainers', {
           name: newTrainerName,
+          code: App.nextCode('trainers'),
           specialty: form.querySelector('[name="newTrainerSpecialty"]').value.trim(),
           phone: form.querySelector('[name="newTrainerPhone"]').value.trim()
         });
@@ -938,11 +1455,11 @@
       '<div class="field"><label>الفترة *</label><select name="periodId" required>' +
       periods.map(function (p) {
         return '<option value="' + UI.escapeHtml(p.id) + '"' + (p.id === course.periodId ? ' selected' : '') + '>' +
-          UI.escapeHtml(p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
+          UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(p.start) + ' - ' + UI.escapeHtml(p.end) + ')</option>';
       }).join('') + '</select></div>' +
       '<div class="field field-full"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة (تُعيَّن لاحقاً)</option>' +
       App.Store.getAll('halls').map(function (h) {
-        return '<option value="' + UI.escapeHtml(h.id) + '">' + UI.escapeHtml(h.name) + '</option>';
+        return '<option value="' + UI.escapeHtml(h.id) + '">' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
       }).join('') + '</select><div class="field-hint" id="as-availability"></div></div>' +
       '<div class="field field-full"><label>ملاحظة</label><input type="text" name="note" placeholder="ملاحظة على الجلسة (اختياري)"></div>' +
       '</div>';
@@ -1025,7 +1542,7 @@
     var s = App.Store.get('sessions', sessionId);
     var fields = '<div class="field"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة</option>' +
       App.Store.getAll('halls').map(function (h) {
-        return '<option value="' + UI.escapeHtml(h.id) + '"' + (s.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(h.name) + '</option>';
+        return '<option value="' + UI.escapeHtml(h.id) + '"' + (s.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
       }).join('') + '</select><div class="field-hint" id="sh-availability">جارٍ فحص توفر القاعات…</div></div>';
     var modal = UI.openFormModal('تغيير قاعة الجلسة — ' + UI.fmtDateFull(s.date), fields, function (form, close, submitBtn) {
       var hallId = form.querySelector('[name="hallId"]').value || null;
@@ -1075,9 +1592,9 @@
     var fields = '<div class="form-grid">' +
       '<div class="field"><label>الفئة *</label><select name="category" required>' +
       cats.map(function (c) {
-        return '<option value="' + UI.escapeHtml(c.name) + '"' + (expense && expense.category === c.name ? ' selected' : '') + '>' + UI.escapeHtml(c.name) + '</option>';
+        return '<option value="' + UI.escapeHtml(c.name) + '"' + (expense && expense.category === c.name ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(c, 'budgetCategories') + ' — ' + c.name) + '</option>';
       }).join('') + '</select>' +
-      '<div class="field-hint">لإضافة فئة جديدة، استخدم قسم الفئات في شاشة الدليل.</div></div>' +
+      '<div class="field-hint">لإضافة فئة جديدة، استخدم قسم فئات الميزانية في إعدادات المنصة.</div></div>' +
       '<div class="field"><label>المبلغ (ل.س) *</label><input type="number" name="amount" min="0" required value="' +
       UI.escapeHtml(expense ? expense.amount : '') + '"></div>' +
       '<div class="field"><label>التاريخ *</label><input type="date" name="date" required value="' +
