@@ -540,9 +540,17 @@
     return p ? p.label : '';
   }
 
+  // تنسيق نطاق زمني بنظام 12 ساعة (ص/م) — للعرض فقط، التخزين يبقى 24 ساعة.
+  function fmtRange12(start, end) {
+    if (window.TadreebTime && typeof window.TadreebTime.formatTimeRange12 === 'function') {
+      return window.TadreebTime.formatTimeRange12(start, end);
+    }
+    return start + ' - ' + end;
+  }
+
   function periodTime(periodId) {
     var p = periodId ? Store.get('periods', periodId) : null;
-    return p ? (p.start + ' - ' + p.end) : '';
+    return p ? fmtRange12(p.start, p.end) : '';
   }
 
   function directorateName(id) {
@@ -819,7 +827,7 @@
         hours: hours
       } : null,
       days: UI.daysLabel(course.days),
-      period: period ? period.label + ' (' + period.start + ' - ' + period.end + ')' : '',
+      period: period ? period.label + ' (' + fmtRange12(period.start, period.end) + ')' : '',
       startDate: course.startDate || (sessions.length ? sessions[0].date : ''),
       sessionCount: course.sessionCount,
       budget: course.budget,
@@ -841,8 +849,7 @@
       return {
         name: t.name,
         directorate: directorateName(t.directorateId),
-        phone: t.phone || '',
-        status: t.status ? UI.TRAINEE_STATUS_LABELS[t.status] : ''
+        phone: t.phone || ''
       };
     });
     var budget = budgetFromCache(courseId);
@@ -915,7 +922,7 @@
       });
     });
     return {
-      periods: periods.map(function (p) { return { label: p.label, time: p.start + ' - ' + p.end }; }),
+      periods: periods.map(function (p) { return { label: p.label, time: fmtRange12(p.start, p.end) }; }),
       days: days,
       cells: cells
     };
@@ -1172,8 +1179,7 @@
         return {
           name: t.name,
           directorate: directorateName(t.directorateId),
-          phone: t.phone || '',
-          status: t.status ? UI.TRAINEE_STATUS_LABELS[t.status] : ''
+          phone: t.phone || ''
         };
       })
     };
@@ -1317,7 +1323,6 @@
         directorate: directorateName(t.directorateId),
         phone: t.phone || '',
         course: course ? course.name : '',
-        status: t.status ? UI.TRAINEE_STATUS_LABELS[t.status] : '',
         notes: t.notes || ''
       };
     });
@@ -1339,7 +1344,7 @@
       return { name: h.name, capacity: h.capacity, location: '', note: '' };
     });
     var periods = Store.getAll('periods').map(function (p) {
-      return { label: p.label, time: p.start + ' - ' + p.end, note: '' };
+      return { label: p.label, time: fmtRange12(p.start, p.end), note: '' };
     });
     var holidays = Store.getAll('holidays').map(function (h) {
       return { date: h.date, name: h.name, note: '' };

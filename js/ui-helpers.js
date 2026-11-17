@@ -12,15 +12,11 @@
   var WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
   var intlDate = null; // Intl.DateTimeFormat('ar-SY-u-nu-latn') إن كان سليماً
-  var intlDateTime = null;
   try {
     var probe = new Intl.DateTimeFormat('ar-SY-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' });
     var probeText = probe.format(new Date(2026, 10, 17)); // 17 تشرين الثاني 2026
     if (probeText.indexOf('تشرين الثاني') !== -1) {
       intlDate = probe;
-      intlDateTime = new Intl.DateTimeFormat('ar-SY-u-nu-latn', {
-        day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
-      });
     }
   } catch (e) { /* نستخدم التنسيق اليدوي أدناه */ }
 
@@ -71,8 +67,16 @@
     return d ? WEEKDAYS[d.getDay()] : '';
   }
 
+  // نطاق وقتين «HH:MM» بنظام 12 ساعة: «09:00 ص - 11:00 ص» — عبر
+  // TadreebTime.formatTimeRange12 إن توفر (يغلّف النطاق بعلامتي
+  // LRE…PDF حتى لا ينقلب في السياق العربي)، وإلا الصيغة الأصلية.
   function fmtTimeRange(start, end) {
     if (!start || !end) return '';
+    if (window.TadreebTime && typeof window.TadreebTime.formatTimeRange12 === 'function') {
+      try {
+        return '<span class="ltr">' + escapeHtml(window.TadreebTime.formatTimeRange12(start, end)) + '</span>';
+      } catch (e) { /* احتياطي أدناه */ }
+    }
     return '<span class="ltr">' + escapeHtml(start) + ' - ' + escapeHtml(end) + '</span>';
   }
 
@@ -97,7 +101,21 @@
     return parts.join(' و');
   }
 
-  // طابع زمني (Timestamp من Firestore أو رقم أو Date) → "17 تشرين الثاني 2026، 09:30"
+  // وقت «Date» بنظام 12 ساعة: «09:30 ص» / «03:00 م» — عبر
+  // TadreebTime.formatTime (توقيت دمشق) إن توفر، وإلا تحويل يدوي
+  // صحيح من ساعة الجهاز (12 ← 12، 0 ← 12 ص، 13 ← 01 م).
+  function fmtTime12Of(d) {
+    if (window.TadreebTime && typeof window.TadreebTime.formatTime === 'function') {
+      try { return window.TadreebTime.formatTime(d); } catch (e) { /* احتياطي أدناه */ }
+    }
+    var h = d.getHours();
+    var suffix = h < 12 ? 'ص' : 'م';
+    var h12 = h % 12;
+    if (h12 === 0) h12 = 12;
+    return pad(h12) + ':' + pad(d.getMinutes()) + ' ' + suffix;
+  }
+
+  // طابع زمني (Timestamp من Firestore أو رقم أو Date) → "17 تشرين الثاني 2026، 09:30 ص"
   function fmtTimestamp(ts) {
     if (ts == null) return '';
     var d = null;
@@ -106,8 +124,7 @@
     else if (typeof ts.toDate === 'function') { try { d = ts.toDate(); } catch (e) { d = null; } }
     else if (typeof ts === 'string') d = new Date(ts);
     if (!d || isNaN(d.getTime())) return '';
-    if (intlDateTime) return intlDateTime.format(d);
-    return fmtDate(d) + '، ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return fmtDate(d) + '، ' + fmtTime12Of(d);
   }
 
   function tsMillis(ts) {
@@ -387,9 +404,6 @@
     scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب', holiday: 'عطلة'
   };
   var ATTENDANCE_LABELS = { present: 'موجود', absent: 'غائب', excused: 'معتذر' };
-  var TRAINEE_STATUS_LABELS = {
-    passed: 'ناجح في الدورة', absent: 'غائب', 'never-attended': 'لم يحضر', cancelled: 'ملغى الاسم'
-  };
   var ROLE_LABELS = { admin: 'مدير', editor: 'محرر', viewer: 'عارض' };
 
   function pillForCourseStatus(status) {
@@ -407,12 +421,6 @@
     if (!status) return '<span class="muted">بلا تسجيل</span>';
     var cls = status === 'present' ? 'pill-green' : status === 'absent' ? 'pill-red' : 'pill-amber';
     return '<span class="pill ' + cls + '">' + escapeHtml(ATTENDANCE_LABELS[status] || status) + '</span>';
-  }
-
-  function pillForTraineeStatus(status) {
-    if (!status) return '<span class="muted">بلا حالة</span>';
-    var cls = status === 'passed' ? 'pill-green' : status === 'cancelled' ? 'pill-grey' : 'pill-amber';
-    return '<span class="pill ' + cls + '">' + escapeHtml(TRAINEE_STATUS_LABELS[status] || status) + '</span>';
   }
 
   function roleLabel(role) { return ROLE_LABELS[role] || role || ''; }
@@ -631,12 +639,10 @@
     COURSE_STATUS_LABELS: COURSE_STATUS_LABELS,
     SESSION_STATE_LABELS: SESSION_STATE_LABELS,
     ATTENDANCE_LABELS: ATTENDANCE_LABELS,
-    TRAINEE_STATUS_LABELS: TRAINEE_STATUS_LABELS,
     ROLE_LABELS: ROLE_LABELS,
     pillForCourseStatus: pillForCourseStatus,
     pillForSessionState: pillForSessionState,
     pillForAttendance: pillForAttendance,
-    pillForTraineeStatus: pillForTraineeStatus,
     roleLabel: roleLabel,
     daysLabel: daysLabel,
     notesWidget: notesWidget,

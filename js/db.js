@@ -27,10 +27,9 @@
   };
 
   // حالات المتدرب — متميزة تماماً كما سمّاها بدر:
-  // passed = ناجح في الدورة، absent = غائب، never-attended = لم يحضر،
-  // cancelled = ملغى الاسم. وحالة الحضور في الجلسة: present/absent/excused
-  // (موجود/غائب/معتذر) — معتذر مع مبرر في حقل note.
-  var TRAINEE_STATUSES = ['passed', 'absent', 'never-attended', 'cancelled'];
+  // حالة الحضور في الجلسة: present/absent/excused (موجود/غائب/معتذر)
+  // — معتذر مع مبرر في حقل note. (حالة المتدرب على بطاقته أُزيلت في
+  // v2.1 — بند 9: الحالة تُسجَّل في تفقد الجلسة فقط.)
   var ATTENDANCE_STATUSES = ['present', 'absent', 'excused'];
   var SESSION_STATES = ['scheduled', 'done', 'cancelled', 'trainer-absent', 'holiday'];
   // حالات الاجتماع العارض: مجدول يشغل القاعة، ملغى يحرّرها.
@@ -40,7 +39,6 @@
   // تسميات عربية لسجل التدقيق (القيم الإنكليزية لا تظهر للمستخدم أبداً).
   var SESSION_STATE_LABELS = { scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب', holiday: 'عطلة' };
   var ATTENDANCE_LABELS = { present: 'موجود', absent: 'غائب', excused: 'معتذر' };
-  var TRAINEE_STATUS_LABELS = { passed: 'ناجح في الدورة', absent: 'غائب', 'never-attended': 'لم يحضر', cancelled: 'ملغى الاسم' };
 
   var DEFAULT_PERIODS = [
     { label: 'الفترة الأولى', start: '09:00', end: '11:00', order: 1 },
@@ -787,7 +785,7 @@
     }).then(function () {
       // التحقق الكامل: ليس عطلة، والقاعة حرة (الجلسة الأصلية في موعد
       // مختلف أصلاً فلا تعارض ذاتي هنا).
-      return validateSessionSlot(newDate, newPeriodId, newHallId, sessionId);
+      return validateSessionSlot(newDate, newPeriodId, newHallId, sessionId, newDate === original.date);
     }).then(function () {
       var actor = actorInfo();
       var origLabel = origPeriod ? origPeriod.label : '';
@@ -886,8 +884,15 @@
     });
   }
 
-  function validateSessionSlot(date, periodId, hallId, excludeSessionId) {
-    return db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', date).limit(1).get()
+  // skipHolidayCheck: يُتخطى فحص العطلة عند بقاء التاريخ نفسه
+  // (جلسة وُجدت قبل تسجيل العطلة — تعديل قاعتها أو فترتها ضمن اليوم
+  // نفسه لا ينقلها إلى عطلة؛ فحص الإشغال يبقى دائماً). الإنشاء ونقل
+  // الجلسة إلى تاريخ جديد يفحصان العطلة دائماً.
+  function validateSessionSlot(date, periodId, hallId, excludeSessionId, skipHolidayCheck) {
+    var holidayP = skipHolidayCheck
+      ? Promise.resolve({ empty: true })
+      : db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', date).limit(1).get();
+    return holidayP
       .then(function (snap) {
         if (!snap.empty) throw new Error('التاريخ المختار يوم عطلة — اختر تاريخاً آخر');
         if (!hallId) return null;
@@ -902,8 +907,12 @@
   // --- التحقق المشترك من صلاحية موعد اجتماع عارض (للإنشاء والتعديل) ---
   // نفس قواعد الجلسة: ليس عطلة، والقاعة حرة من جلسة مجدولة ومن اجتماع
   // عارض مجدول آخر. excludeMeetingId يستثني الاجتماع نفسه عند تعديله.
-  function validateMeetingSlot(date, periodId, hallId, excludeMeetingId) {
-    return db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', date).limit(1).get()
+  // skipHolidayCheck كالجلسة: يُتخطى فحص العطلة عند بقاء التاريخ نفسه.
+  function validateMeetingSlot(date, periodId, hallId, excludeMeetingId, skipHolidayCheck) {
+    var holidayP = skipHolidayCheck
+      ? Promise.resolve({ empty: true })
+      : db().collection(COLLECTIONS.HOLIDAYS).where('date', '==', date).limit(1).get();
+    return holidayP
       .then(function (snap) {
         if (!snap.empty) throw new Error('التاريخ المختار يوم عطلة — اختر تاريخاً آخر');
         if (!hallId) return null;
@@ -929,7 +938,7 @@
       if (!s) throw new Error('الجلسة غير موجودة');
       session = s;
       targetHall = (hallId === undefined) ? (s.hallId || null) : hallId;
-      return validateSessionSlot(newDate, newPeriodId, targetHall, sessionId);
+      return validateSessionSlot(newDate, newPeriodId, targetHall, sessionId, newDate === session.date);
     }).then(function () {
       var line = 'تأجيل إلى ' + newDate;
       if (typeof note === 'string' && note.trim()) line += ' — ' + note.trim();
@@ -998,7 +1007,7 @@
       var slotChanged = (newDate !== s.date) || (newPeriodId !== s.periodId);
       var hallChanged = newHallId !== (s.hallId || null);
       if (!slotChanged && !hallChanged) return null;
-      return validateSessionSlot(newDate, newPeriodId, newHallId, sessionId);
+      return validateSessionSlot(newDate, newPeriodId, newHallId, sessionId, newDate === s.date);
     }).then(function () {
       var updateData = {};
       if (data.date) updateData.date = data.date;
@@ -1064,7 +1073,7 @@
       if (!newHallId) throw new Error('اختر قاعة الاجتماع');
       var slotChanged = (newDate !== m.date) || (newPeriodId !== m.periodId) || (newHallId !== m.hallId);
       if (!slotChanged) return null;
-      return validateMeetingSlot(newDate, newPeriodId, newHallId, id);
+      return validateMeetingSlot(newDate, newPeriodId, newHallId, id, newDate === m.date);
     }).then(function () {
       var updateData = {};
       if (data.title !== undefined) updateData.title = String(data.title).trim();
@@ -1141,6 +1150,19 @@
       });
   }
 
+  // مسح تسجيل حضور متدرب في جلسة (إعادته إلى «بلا تسجيل») — تصحيح
+  // تسجيل خاطئ بدل إجباره على حالة غير صحيحة. يُسجَّل في التدقيق.
+  function clearAttendance(sessionId, traineeId) {
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    return db().collection(COLLECTIONS.SESSIONS).doc(sessionId)
+      .collection('attendance').doc(traineeId).delete().then(function () {
+        return get(COLLECTIONS.TRAINEES, traineeId).catch(function () { return null; });
+      }).then(function (trainee) {
+        logAudit('attendance', COLLECTIONS.SESSIONS, sessionId,
+          'مسح تسجيل حضور متدرب ' + (trainee ? trainee.name : traineeId));
+      });
+  }
+
   function getSessionAttendance(sessionId) {
     return db().collection(COLLECTIONS.SESSIONS).doc(sessionId)
       .collection('attendance').get().then(function (snap) {
@@ -1152,19 +1174,6 @@
         });
         return map;
       });
-  }
-
-  function setTraineeStatus(traineeId, status, notes) {
-    try { requireWrite(); } catch (e) { return Promise.reject(e); }
-    if (status !== null && TRAINEE_STATUSES.indexOf(status) === -1) {
-      return Promise.reject(new Error('حالة المتدرب غير صالحة'));
-    }
-    var data = { status: status };
-    if (typeof notes === 'string') data.notes = notes;
-    return db().collection(COLLECTIONS.TRAINEES).doc(traineeId).update(data).then(function () {
-      logAudit('trainee_status', COLLECTIONS.TRAINEES, traineeId,
-        'تغيير حالة المتدرب إلى: ' + (status ? (TRAINEE_STATUS_LABELS[status] || status) : 'بلا حالة'));
-    });
   }
 
   // --- أجور المدربين والميزانية ---
@@ -1239,7 +1248,6 @@
 
   window.TadreebDB = {
     COLLECTIONS: COLLECTIONS,
-    TRAINEE_STATUSES: TRAINEE_STATUSES,
     ATTENDANCE_STATUSES: ATTENDANCE_STATUSES,
     SESSION_STATES: SESSION_STATES,
     MEETING_STATUSES: MEETING_STATUSES,
@@ -1268,8 +1276,8 @@
     deleteMeeting: deleteMeeting,
     recordTrainerAttendance: recordTrainerAttendance,
     setAttendance: setAttendance,
+    clearAttendance: clearAttendance,
     getSessionAttendance: getSessionAttendance,
-    setTraineeStatus: setTraineeStatus,
     trainerFeeDue: trainerFeeDue,
     courseBudgetSummary: courseBudgetSummary,
     logAudit: logAudit,

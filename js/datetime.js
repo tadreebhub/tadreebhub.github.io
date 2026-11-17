@@ -102,21 +102,45 @@
     return WEEKDAYS[p.weekday] + ' ' + p.day + ' ' + LEVANT_MONTHS[p.month - 1] + ' ' + p.year;
   }
 
-  // «HH:MM» بنظام 24 ساعة بتوقيت دمشق.
+  // تحويل ساعة/دقيقة (بنظام 24 ساعة) إلى صيغة 12 ساعة:
+  // «09:00 ص»، «01:00 م»، «12:30 ص» (منتصف الليل)، «12:00 م» (الظهر).
+  // أرقام لاتينية، ساعة برقمين (01–12)، وعلامتا ص/م فقط.
+  function formatHourMinute12(hour, minute) {
+    var h = ((hour % 24) + 24) % 24;
+    var suffix = h < 12 ? 'ص' : 'م';
+    var h12 = h % 12;
+    if (h12 === 0) h12 = 12;
+    return pad(h12) + ':' + pad(minute) + ' ' + suffix;
+  }
+
+  // «HH:MM» بنظام 12 ساعة بتوقيت دمشق — مثال: «10:57 م».
+  // تُحسب الأجزاء بتوقيت دمشق عبر damascusParts (مع احتياطي يدوي
+  // عند غياب Intl)، ثم يُحوَّل العرض يدوياً ليطابق الصيغة المطلوبة
+  // تماماً (أرقام لاتينية، ص/م) في كل المتصفحات.
   function formatTime(date) {
-    var d = toDate(date);
-    try {
-      if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-        var text = new Intl.DateTimeFormat(LOCALE_LONG, {
-          timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false
-        }).format(d);
-        // بعض المتصفحات تعيد «24:00» عند منتصف الليل مع hour12:false.
-        if (text.indexOf('24:') === 0) text = '00:' + text.slice(3);
-        return text;
-      }
-    } catch (e) { /* احتياطي أدناه */ }
-    var p = damascusParts(d);
-    return pad(p.hour) + ':' + pad(p.minute);
+    var p = damascusParts(toDate(date));
+    return formatHourMinute12(p.hour, p.minute);
+  }
+
+  // تنسيق وقت «HH:MM» (بنظام 24 ساعة) إلى 12 ساعة:
+  // «13:00» ← «01:00 م»، «09:00» ← «09:00 ص»، «00:30» ← «12:30 ص»،
+  // «12:00» ← «12:00 م». مدخل غير صالح يُعاد كما هو (بلا تعطّل).
+  function formatTime12(hhmm) {
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim());
+    if (!m) return String(hhmm == null ? '' : hhmm);
+    var h = parseInt(m[1], 10);
+    var min = parseInt(m[2], 10);
+    if (h < 0 || h > 23 || min < 0 || min > 59) return String(hhmm);
+    return formatHourMinute12(h, min);
+  }
+
+  // نطاق وقتين «HH:MM» بنظام 12 ساعة:
+  // «01:00 م - 03:00 م»، «09:00 ص - 11:00 ص».
+  // نطاق زمني بنظام 12 ساعة («09:00 ص - 11:00 ص») — ملفوف بعلامتي
+  // LRE…PDF لأن النطاق غير المغلّف يُعرض مقلوباً في السياق العربي
+  // (مُقاس في Playwright: «11:00 ص - 09:00 ص» بلا العلامتين).
+  function formatTimeRange12(start, end) {
+    return '\u202A' + formatTime12(start) + ' - ' + formatTime12(end) + '\u202C';
   }
 
   // «17/11/2026» — يوم/شهر/سنة بتوقيت دمشق.
@@ -125,7 +149,7 @@
     return pad(p.day) + '/' + pad(p.month) + '/' + p.year;
   }
 
-  // التاريخ الطويل مع الوقت: «الثلاثاء 17 تشرين الثاني 2026، 21:49».
+  // التاريخ الطويل مع الوقت: «الثلاثاء 17 تشرين الثاني 2026، 09:49 م».
   function formatDateTime(date) {
     return formatDateLong(date) + '، ' + formatTime(date);
   }
@@ -159,6 +183,8 @@
     todayISO: todayISO,
     formatDateLong: formatDateLong,
     formatTime: formatTime,
+    formatTime12: formatTime12,
+    formatTimeRange12: formatTimeRange12,
     formatDateShort: formatDateShort,
     formatDateTime: formatDateTime,
     startClock: startClock,
