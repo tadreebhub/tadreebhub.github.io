@@ -671,6 +671,88 @@
     });
   }
 
+  // ---------- هوية مجموعة التدريب (v2.3 — N) ----------
+  // رقم المجموعة: المخزَّن (groupNumber) إن وُجد، وإلا مشتق من ترتيب
+  // الإنشاء (النهج نفسه في displayCode) دون كتابة — للمجموعات القديمة
+  // بلا حقل مخزَّن. لا يرمي أبداً.
+  function groupNumber(course) {
+    if (course && typeof course.groupNumber === 'number' && isFinite(course.groupNumber) && course.groupNumber >= 1) {
+      return Math.floor(course.groupNumber);
+    }
+    if (!course || course.id == null) return 1;
+    var list = sortedForCode('courses');
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === course.id) return i + 1;
+    }
+    return 1;
+  }
+
+  // الرقم التالي عند الإنشاء: أعلى رقم ظاهر (مخزَّن أو مشتق) + 1،
+  // على مستوى المنصة كلها. سباق نظري إن أنشأ مديران في اللحظة نفسها
+  // (الرقم وسيلة عرض لا معرّفاً — انظر SPEC §21).
+  function nextGroupNumber() {
+    var max = 0;
+    Store.getAll('courses').forEach(function (c) {
+      var n = groupNumber(c);
+      if (n > max) max = n;
+    });
+    return max + 1;
+  }
+
+  // الاسم المخصص (حقل customName) بعد التقليم، وإلا ''.
+  function customGroupName(course) {
+    return (course && typeof course.customName === 'string') ? course.customName.trim() : '';
+  }
+
+  // مديريات متدربي المجموعة مرتبة بالاسم: [{id, name, count}]؛
+  // المتدرب بلا مديرية يُجمع تحت id فارغ.
+  function groupDirectorates(course) {
+    var map = {};
+    courseTrainees(course).forEach(function (t) {
+      var id = t.directorateId || '';
+      if (!map[id]) map[id] = { id: id, name: id ? (directorateName(id) || '') : '', count: 0 };
+      map[id].count++;
+    });
+    return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    });
+  }
+
+  // جزء المديرية في الاسم التلقائي: المديرية الأساسية المعيّنة
+  // (directorateId)، وإلا مديرية المتدربين الوحيدة إن كانت واحدة،
+  // وإلا «مديريات متعددة» عند تعددها، وإلا «بلا مديرية».
+  function groupDirectoratePart(course) {
+    if (course && course.directorateId) {
+      var primary = directorateName(course.directorateId);
+      if (primary) return primary;
+    }
+    var dirs = groupDirectorates(course).filter(function (d) { return d.id; });
+    if (dirs.length === 1) return dirs[0].name;
+    if (dirs.length > 1) return 'مديريات متعددة';
+    return 'بلا مديرية';
+  }
+
+  // الاسم التلقائي: «مجموعة تدريب N — [المديرية] — [اسم الدورة]».
+  function groupAutoName(course) {
+    return 'مجموعة تدريب ' + groupNumber(course) + ' — ' +
+      groupDirectoratePart(course) + ' — ' + ((course && course.name) || '');
+  }
+
+  // الاسم المعروض: المخصص إن وُجد، وإلا التلقائي.
+  function groupDisplayName(course) {
+    var custom = customGroupName(course);
+    return custom || groupAutoName(course);
+  }
+
+  // ملخص مديريات المتدربين للعرض: «مديرية التربية (4) · مديرية الصحة (2)».
+  function groupDirectoratesSummary(course) {
+    var dirs = groupDirectorates(course);
+    if (!dirs.length) return '';
+    return dirs.map(function (d) {
+      return (d.name || 'بلا مديرية') + ' (' + d.count + ')';
+    }).join(' · ');
+  }
+
   // تسمية الجلسة المشتقة (تُعرض فقط، لا تُخزَّن ولا تُعدَّل):
   // «رمز الدورة / ج N» حيث N ترتيب الجلسة بين جلسات دورتها حسب التاريخ.
   function sessionLabel(session, course) {
@@ -731,6 +813,7 @@
       var trainees = course ? courseTrainees(course) : [];
       return {
         courseName: course ? course.name : '',
+        displayName: course ? groupDisplayName(course) : '',
         sessionDate: session.date,
         periodLabel: periodLabel(session.periodId),
         hallName: hallName(session.hallId),
@@ -751,7 +834,7 @@
   // بيانات تقرير الحضور والغياب لعدة جلسات من دورة واحدة (تصدير بنطاق).
   function buildAttendanceReportData(courseId, sessionIds) {
     var course = Store.get('courses', courseId);
-    if (!course) return Promise.reject(new Error('الدورة غير موجودة'));
+    if (!course) return Promise.reject(new Error('مجموعة التدريب غير موجودة'));
     var ids = Array.isArray(sessionIds) ? sessionIds : [];
     var sessions = ids.map(function (id) { return Store.get('sessions', id); }).filter(Boolean)
       .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
@@ -788,6 +871,7 @@
     return chain.then(function () {
       return {
         courseName: course.name,
+        displayName: groupDisplayName(course),
         groupName: groupNameVal,
         directorate: groupDirVal,
         sessions: outSessions
@@ -798,7 +882,7 @@
   // بيانات ملف الدورة الكامل (معلومات + جدول + متدربون + حضور + ميزانية).
   function buildCourseFileData(courseId) {
     var course = Store.get('courses', courseId);
-    if (!course) return Promise.reject(new Error('الدورة غير موجودة'));
+    if (!course) return Promise.reject(new Error('مجموعة التدريب غير موجودة'));
     var sessions = sessionsForCourse(courseId);
     var period = periodFor(course);
     var contract = course.trainerContract || null;
@@ -815,6 +899,10 @@
     var groupLabel = groupNameVal ? (groupDirVal ? groupNameVal + ' — ' + groupDirVal : groupNameVal) : '';
     var info = {
       name: course.name,
+      displayName: groupDisplayName(course),
+      groupNumber: groupNumber(course),
+      customName: customGroupName(course),
+      directoratesSummary: groupDirectoratesSummary(course),
       code: displayCode(course, 'courses'),
       level: levelName(course.level),
       trainer: trainerName(course.trainerId),
@@ -1046,6 +1134,7 @@
       var period = periodFor(c);
       return {
         name: c.name,
+        displayName: groupDisplayName(c),
         trainer: trainerName(c.trainerId),
         days: UI.daysLabel(c.days),
         period: period ? period.label : '',
@@ -1087,6 +1176,7 @@
       return {
         row: {
           name: course.name || '',
+          displayName: groupDisplayName(course),
           code: displayCode(course, 'courses'),
           level: levelName(course.level),
           group: groupName(course.groupId) || '',
@@ -1190,6 +1280,7 @@
     var budget = budgetFromCache(courseId);
     return {
       courseName: course ? course.name : '',
+      displayName: course ? groupDisplayName(course) : '',
       allocated: budget.allocated,
       totalSpent: budget.totalSpent,
       remaining: budget.remaining,
@@ -1251,6 +1342,7 @@
       var budget = budgetFromCache(c.id);
       return {
         name: c.name,
+        displayName: groupDisplayName(c),
         trainer: trainerName(c.trainerId),
         progress: prog.percent,
         done: prog.done,
@@ -1291,6 +1383,7 @@
     var courses = Store.getAll('courses').map(function (c) {
       return {
         name: c.name,
+        displayName: groupDisplayName(c),
         trainer: trainerName(c.trainerId),
         days: UI.daysLabel(c.days),
         period: periodLabel(c.periodId),
@@ -1303,7 +1396,7 @@
     var sessions = Store.getAll('sessions').map(function (s) {
       var course = Store.get('courses', s.courseId);
       return {
-        course: course ? course.name : '',
+        course: course ? groupDisplayName(course) : '',
         date: s.date,
         day: UI.fmtWeekday(s.date),
         period: periodLabel(s.periodId),
@@ -1322,7 +1415,7 @@
         name: t.name,
         directorate: directorateName(t.directorateId),
         phone: t.phone || '',
-        course: course ? course.name : '',
+        course: course ? groupDisplayName(course) : '',
         notes: t.notes || ''
       };
     });
@@ -1353,7 +1446,7 @@
       var course = Store.get('courses', e.courseId);
       return {
         date: e.date,
-        course: course ? course.name : '',
+        course: course ? groupDisplayName(course) : '',
         category: e.category,
         description: e.description,
         details: '',
@@ -1437,6 +1530,12 @@
     isCodeUnique: isCodeUnique,
     sessionLabel: sessionLabel,
     courseTrainees: courseTrainees,
+    groupNumber: groupNumber,
+    nextGroupNumber: nextGroupNumber,
+    groupAutoName: groupAutoName,
+    groupDisplayName: groupDisplayName,
+    customGroupName: customGroupName,
+    groupDirectoratesSummary: groupDirectoratesSummary,
     weekDays: weekDays,
     buildTodayData: buildTodayData,
     buildAttendanceData: buildAttendanceData,

@@ -8,7 +8,7 @@
   'use strict';
 
   var ENTITY_LABELS = {
-    course: 'الدورة',
+    course: 'مجموعة تدريب',
     session: 'الجلسة',
     trainee: 'المتدرب',
     trainer: 'المدرب',

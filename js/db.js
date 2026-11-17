@@ -27,18 +27,57 @@
   };
 
   // حالات المتدرب — متميزة تماماً كما سمّاها بدر:
-  // حالة الحضور في الجلسة: present/absent/excused (موجود/غائب/معتذر)
-  // — معتذر مع مبرر في حقل note. (حالة المتدرب على بطاقته أُزيلت في
-  // v2.1 — بند 9: الحالة تُسجَّل في تفقد الجلسة فقط.)
-  var ATTENDANCE_STATUSES = ['present', 'absent', 'excused'];
+  // حالة الحضور في الجلسة: present/absent/excused/cancelled
+  // (موجود/غائب/معتذر/ملغي) — معتذر مع مبرر في حقل note.
+  // (حالة المتدرب على بطاقته أُزيلت في v2.1 — بند 9: الحالة تُسجَّل
+  // في تفقد الجلسة فقط.) v2.3: «ملغي» حالة قابلة للاختيار (سجل
+  // مُبطل — يُستثنى من مقام نسبة الحضور)؛ «معتذر» إرثي: يُقبل
+  // كتابةً للتوافق مع السجلات القديمة لكنه لم يعد خياراً في الواجهة.
+  // 'did-not-attend' (لم يحضر) قيمة إرثية محتملة تُعرض فقط ولا تُكتب.
+  var ATTENDANCE_STATUSES = ['present', 'absent', 'excused', 'cancelled'];
   var SESSION_STATES = ['scheduled', 'done', 'cancelled', 'trainer-absent', 'holiday'];
   // حالات الاجتماع العارض: مجدول يشغل القاعة، ملغى يحرّرها.
   var MEETING_STATUSES = ['scheduled', 'cancelled'];
   var COURSE_STATUSES = ['active', 'completed', 'cancelled', 'paused'];
 
+  // ---------- أنواع القاعات والدورات (v2.3 — W3) ----------
+  // القاعة: 'admin' (إدارية) أو 'computer' (حاسوب) في حقل hallType.
+  // الدورة: 'admin' (إداري) أو 'technical' (تقني) في حقل courseType.
+  // توافق رجعي: أي سجل بلا حقل نوع (أو بقيمة غير معروفة) يُعامل
+  // كإداري في كل مكان — لا يتعطل شيء على البيانات القديمة أبداً.
+  var HALL_TYPES = { ADMIN: 'admin', COMPUTER: 'computer' };
+  var COURSE_TYPES = { ADMIN: 'admin', TECHNICAL: 'technical' };
+  var HALL_TYPE_LABELS = { admin: 'إدارية', computer: 'حاسوب' };
+  var COURSE_TYPE_LABELS = { admin: 'إداري', technical: 'تقني' };
+
+  function hallTypeOf(hall) {
+    return (hall && hall.hallType === 'computer') ? 'computer' : 'admin';
+  }
+
+  function courseTypeOf(course) {
+    return (course && course.courseType === 'technical') ? 'technical' : 'admin';
+  }
+
+  function hallTypeForCourseType(courseType) {
+    return courseType === 'technical' ? 'computer' : 'admin';
+  }
+
+  // القاعات المطابقة لنوع دورة: قاعات النوع المطابق فقط (تقنية ←
+  // حاسوب، إدارية ← إدارية). قاعدة الرجوع الآمن (موثقة): إن لم توجد
+  // قاعة من النوع المطابق أصلاً تُرجع كل القاعات — حتى لا يصل
+  // الإسناد التلقائي إلى طريق مسدود. بلا نوع محدد (null) تُرجع كل
+  // القاعات دون تصفية (سلوك ما قبل الأنواع).
+  function matchingHalls(halls, courseType) {
+    var list = (halls || []).slice();
+    if (courseType == null || courseType === '') return list;
+    var want = hallTypeForCourseType(courseType);
+    var typed = list.filter(function (h) { return hallTypeOf(h) === want; });
+    return typed.length ? typed : list;
+  }
+
   // تسميات عربية لسجل التدقيق (القيم الإنكليزية لا تظهر للمستخدم أبداً).
   var SESSION_STATE_LABELS = { scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب', holiday: 'عطلة' };
-  var ATTENDANCE_LABELS = { present: 'موجود', absent: 'غائب', excused: 'معتذر' };
+  var ATTENDANCE_LABELS = { present: 'موجود', absent: 'غائب', excused: 'معتذر', cancelled: 'ملغي', 'did-not-attend': 'لم يحضر' };
 
   var DEFAULT_PERIODS = [
     { label: 'الفترة الأولى', start: '09:00', end: '11:00', order: 1 },
@@ -174,7 +213,7 @@
       createdBy: data.createdBy || actor.userId
     });
     return db().collection(col).add(payload).then(function (ref) {
-      logAudit('create', col, ref.id, 'إنشاء: ' + (describe(data) || ref.id));
+      logAudit('create', col, ref.id, (col === COLLECTIONS.COURSES ? 'إنشاء مجموعة تدريب: ' : 'إنشاء: ') + (describe(data) || ref.id));
       return ref.id;
     });
   }
@@ -191,7 +230,7 @@
     }
     try { requireWrite(); } catch (e) { return Promise.reject(e); }
     return db().collection(col).doc(id).update(data).then(function () {
-      logAudit('update', col, id, 'تعديل: ' + (describe(data) || id));
+      logAudit('update', col, id, (col === COLLECTIONS.COURSES ? 'تعديل مجموعة تدريب: ' : 'تعديل: ') + (describe(data) || id));
     });
   }
 
@@ -207,7 +246,7 @@
     }
     try { requireWrite(); } catch (e) { return Promise.reject(e); }
     return db().collection(col).doc(id).delete().then(function () {
-      logAudit('delete', col, id, 'حذف: ' + id);
+      logAudit('delete', col, id, (col === COLLECTIONS.COURSES ? 'حذف مجموعة تدريب: ' : 'حذف: ') + id);
     });
   }
 
@@ -274,13 +313,13 @@
     var course, holidaysSet, existingDates, existingCount, halls, occupied;
 
     return get(COLLECTIONS.COURSES, courseId).then(function (c) {
-      if (!c) throw new Error('الدورة غير موجودة');
+      if (!c) throw new Error('مجموعة التدريب غير موجودة');
       if (!Array.isArray(c.days) || c.days.length === 0) {
-        throw new Error('الدورة بلا أيام أسبوعية — حدّد أيام الدورة أولاً');
+        throw new Error('مجموعة التدريب بلا أيام أسبوعية — حدّد أيام مجموعة التدريب أولاً');
       }
-      if (!c.periodId) throw new Error('الدورة بلا فترة تدريبية — حدّد الفترة أولاً');
+      if (!c.periodId) throw new Error('مجموعة التدريب بلا فترة تدريبية — حدّد الفترة أولاً');
       if (!c.sessionCount || c.sessionCount < 1) {
-        throw new Error('عدد جلسات الدورة غير محدد');
+        throw new Error('عدد جلسات مجموعة التدريب غير محدد');
       }
       course = c;
       return Promise.all([
@@ -321,9 +360,15 @@
         occupied[mkey].add(m.hallId);
       });
       halls = results[3];
+      // قاعات النوع المطابق للدورة فقط (تقنية ← حاسوب، إدارية ←
+      // إدارية)، مع قاعدة الرجوع الآمن: إن لم توجد قاعة مطابقة أصلاً
+      // تُستخدم كل القاعات (matchingHalls). القاعة المحددة صراحةً في
+      // dayPlan تُحترم كما هي (انظر أدناه).
+      var typeHalls = matchingHalls(halls, courseTypeOf(course));
 
       var created = 0;
       var skippedHolidays = 0;
+      var skippedWeekend = 0;
       var unassignedHalls = [];
       var batch = db().batch();
       var total = existingCount;
@@ -336,6 +381,9 @@
         var ds = dateStr(d);
         if (existingDates.has(ds)) continue; // جلسة موجودة — لا تكرار
         if (holidaysSet.has(ds)) { skippedHolidays++; continue; }
+        // العطلة الأسبوعية (v2.3): بلا جلسات أبداً (الجمعة + السبت
+        // افتراضياً، قابلة للتغيير من الإعدادات).
+        if (getWeekendDays().indexOf(d.getDay()) !== -1) { skippedWeekend++; continue; }
 
         // الخطة الأسبوعية (v1.1): فترة وقاعة لكل يوم على حدة؛ الدورات
         // القديمة بلا dayPlan تأخذ الفترة الرئيسية وأول قاعة حرة كما قبل.
@@ -351,16 +399,17 @@
           // للتنفيذ أصلاً، فنعود إلى أول قاعة حرة.
           var hallExists = halls.some(function (hh) { return hh.id === plan.hallId; });
           if (!hallExists) {
-            for (var hi = 0; hi < halls.length; hi++) {
-              if (!busy.has(halls[hi].id)) { hallId = halls[hi].id; break; }
+            // القاعة المطلوبة حُذفت: أول قاعة حرة من النوع المطابق.
+            for (var hi = 0; hi < typeHalls.length; hi++) {
+              if (!busy.has(typeHalls[hi].id)) { hallId = typeHalls[hi].id; break; }
             }
           } else if (!busy.has(plan.hallId)) {
             hallId = plan.hallId;
           }
         } else {
-          // أول قاعة حرة في ذلك التاريخ والفترة.
-          for (var h = 0; h < halls.length; h++) {
-            if (!busy.has(halls[h].id)) { hallId = halls[h].id; break; }
+          // أول قاعة حرة من النوع المطابق في ذلك التاريخ والفترة.
+          for (var h = 0; h < typeHalls.length; h++) {
+            if (!busy.has(typeHalls[h].id)) { hallId = typeHalls[h].id; break; }
           }
         }
         if (hallId) {
@@ -388,12 +437,13 @@
       }
 
       if (created === 0) {
-        return { created: 0, skippedHolidays: skippedHolidays, unassignedHalls: unassignedHalls };
+        return { created: 0, skippedHolidays: skippedHolidays, skippedWeekend: skippedWeekend, unassignedHalls: unassignedHalls };
       }
       return batch.commit().then(function () {
         logAudit('schedule_generate', COLLECTIONS.COURSES, courseId,
-          'توليد جدول: ' + created + ' جلسة جديدة، ' + skippedHolidays + ' يوم عطلة متخطى');
-        return { created: created, skippedHolidays: skippedHolidays, unassignedHalls: unassignedHalls };
+          'توليد جدول: ' + created + ' جلسة جديدة، ' + skippedHolidays + ' يوم عطلة متخطى' +
+          (skippedWeekend ? '، ' + skippedWeekend + ' يوم عطلة أسبوعية متخطى' : ''));
+        return { created: created, skippedHolidays: skippedHolidays, skippedWeekend: skippedWeekend, unassignedHalls: unassignedHalls };
       });
     });
   }
@@ -469,7 +519,7 @@
     var course, classification;
     var totals = { created: 0, skippedHolidays: 0, unassignedHalls: [] };
     return get(COLLECTIONS.COURSES, courseId).then(function (c) {
-      if (!c) throw new Error('الدورة غير موجودة');
+      if (!c) throw new Error('مجموعة التدريب غير موجودة');
       course = c;
       return classifyCourseSessions(courseId);
     }).then(function (cls) {
@@ -503,7 +553,7 @@
       return runChunk();
     }).then(function () {
       logAudit('course_reschedule', COLLECTIONS.COURSES, courseId,
-        'تغيير تاريخ بدء الدورة إلى ' + newStartDate + ': الاحتفاظ بـ ' +
+        'تغيير تاريخ بدء مجموعة التدريب إلى ' + newStartDate + ': الاحتفاظ بـ ' +
         classification.locked.length + ' جلسة، إعادة توليد ' + totals.created + ' جلسة');
       return {
         kept: classification.locked.length,
@@ -572,7 +622,7 @@
     var attendanceRefs = [];
     var expenseRefs = [];
     return get(COLLECTIONS.COURSES, courseId).then(function (c) {
-      if (!c) throw new Error('الدورة غير موجودة');
+      if (!c) throw new Error('مجموعة التدريب غير موجودة');
       courseName = c.name || courseId;
       return db().collection(COLLECTIONS.SESSIONS).where('courseId', '==', courseId).get();
     }).then(function (snap) {
@@ -594,8 +644,8 @@
       });
       return chain.then(function () {
         if (withAttendance > 0) {
-          throw new Error('لا يمكن حذف هذه الدورة — تحتوي ' + withAttendance +
-            ' جلسة على سجلات حضور. يمكنك إيقاف الدورة أو إلغاؤها بدلاً من ذلك.');
+          throw new Error('لا يمكن حذف مجموعة التدريب هذه — تحتوي ' + withAttendance +
+            ' جلسة على سجلات حضور. يمكنك إيقاف مجموعة التدريب أو إلغاؤها بدلاً من ذلك.');
         }
         // الحماية مرّت: لا حضور مسجل أصلاً — قائمة مراجع الحضور فارغة حتماً.
         return db().collection(COLLECTIONS.EXPENSES).where('courseId', '==', courseId).get();
@@ -611,7 +661,7 @@
       return commitDeleteRefsInChunks(refs);
     }).then(function () {
       logAudit('course_delete', COLLECTIONS.COURSES, courseId,
-        'حذف دورة: ' + courseName + ' — ' + sessions.length + ' جلسة، ' + expenseRefs.length + ' مصروف');
+        'حذف مجموعة تدريب: ' + courseName + ' — ' + sessions.length + ' جلسة، ' + expenseRefs.length + ' مصروف');
       return { sessions: sessions.length, expenses: expenseRefs.length };
     });
   }
@@ -622,7 +672,12 @@
   // meetingTitle, occupantKind}. حقل sessionCourse هو التسمية المعروضة
   // في قوائم «مشغولة» عند كل المستدعين: اسم الدورة للجلسة، أو
   // «اجتماع: <العنوان>» للاجتماع — فيبقى نص القوائم صحيحاً دون تغييرها.
-  function checkHallAvailability(date, periodId) {
+  // (v2.3) كل صف يحمل أيضاً hallType. والمعامل الاختياري الثالث
+  // courseType ('admin'|'technical') يضيف preferred (هل القاعة مطابقة
+  // لنوع الدورة) ويرتّب الصفوف: المطابقة المتاحة أولاً، ثم المطابقة
+  // المشغولة، ثم الباقية. بلا courseType يبقى الترتيب والسلوك كما قبل.
+  function checkHallAvailability(date, periodId, courseType) {
+    var wantHallType = courseType ? hallTypeForCourseType(courseType) : null;
     var hallsP = list(COLLECTIONS.HALLS, 'name');
     var sessionsP = db().collection(COLLECTIONS.SESSIONS)
       .where('date', '==', date).where('periodId', '==', periodId).get();
@@ -648,7 +703,7 @@
         .then(function (courses) {
           var names = {};
           courses.forEach(function (c) { if (c) names[c.id] = c.name; });
-          return halls.map(function (hall) {
+          var rows = halls.map(function (hall) {
             var courseId = byHall[hall.id] || null;
             var meetingTitle = byMeeting[hall.id] || null;
             // الجلسة والاجتماع لا يجتمعان في قاعة واحدة أصلاً (التحقق
@@ -657,23 +712,39 @@
             return {
               hallId: hall.id,
               hallName: hall.name,
+              hallType: hallTypeOf(hall),
               free: !kind,
+              preferred: wantHallType ? (hallTypeOf(hall) === wantHallType) : null,
               sessionCourse: courseId ? (names[courseId] || courseId) :
                 (meetingTitle ? 'اجتماع: ' + meetingTitle : null),
               meetingTitle: meetingTitle,
               occupantKind: kind
             };
           });
+          if (wantHallType) {
+            // المطابقة أولاً، والمتاحة قبل المشغولة داخل كل مجموعة.
+            rows.sort(function (a, b) {
+              if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+              if (a.free !== b.free) return a.free ? -1 : 1;
+              return 0;
+            });
+          }
+          return rows;
         });
     });
   }
 
   // --- دمج جلستين ---
   // الأولوية عند تعارض الحضور لنفس المتدرب: حاضر > معتذر > غائب.
+  // v2.3 (تحقق 18 تشرين الثاني 2026): الدمج يُنتج جلسة واحدة فعلاً —
+  // حضور الجلسة المُزالة يُدمج في الباقية ثم تُحذف المُزالة
+  // (batch.delete(removeRef) + سجلّا تدقيق session_merge و
+  // session_merge_delete). «ملغي» أدنى أولوية (0 — سجل مُبطل لا
+  // يطغى على تسجيل فعلي) و«لم يحضر» بمرتبة الغائب (1).
   function mergeSessions(keepId, removeId) {
     try { requireWrite(); } catch (e) { return Promise.reject(e); }
     if (keepId === removeId) return Promise.reject(new Error('لا يمكن دمج جلسة مع نفسها'));
-    var priority = { present: 3, excused: 2, absent: 1 };
+    var priority = { present: 3, excused: 2, absent: 1, 'did-not-attend': 1, cancelled: 0 };
 
     var keep, removeDoc;
     return Promise.all([
@@ -1197,7 +1268,7 @@
   // للازدواج). الواجهة تعرضه سطراً مميزاً بفئة «أجور المدربين».
   function courseBudgetSummary(courseId) {
     return get(COLLECTIONS.COURSES, courseId).then(function (course) {
-      if (!course) throw new Error('الدورة غير موجودة');
+      if (!course) throw new Error('مجموعة التدريب غير موجودة');
       var periodP = course.periodId
         ? get(COLLECTIONS.PERIODS, course.periodId)
         : Promise.resolve(null);
@@ -1246,6 +1317,116 @@
     });
   }
 
+  // --- أيام العطلة الأسبوعية (v2.3 — W3) ---
+  // إعداد مشترك بين كل المنسقين، مخزَّن في مستند meta/general
+  // { weekendDays: [5, 6] } — يوم الأسبوع رقم (0 = الأحد … 6 =
+  // السبت)، والافتراضي الجمعة + السبت. القراءة المتزامنة من ذاكرة
+  // محلية (تُملأ عند أول طلب + مستمع حي يُبقيها محدَّثة) حتى
+  // يقرأها أي عامل دفاعياً دون انتظار وعد.
+  // ⚠️ قيد النشر (بلوكر — على الأب حله قبل النشر الحي): قواعد
+  // Firestore الحالية ترفض أي مستند meta غير setup تماماً
+  // (match /meta/{other} { allow read, write: if false; })، فقراءة
+  // meta/general وكتابته ستفشلان في الإنتاج حتى تُضاف قاعدة تسمح
+  // للمدير بالكتابة ولأي مسجّل دخول بملف نشط بالقراءة. عند الفشل
+  // يبقى الافتراضي [5، 6] سارياً (سلوك آمن)، وفشل الحفظ يظهر
+  // للمستخدم كخطأ صريح لا كنجاح وهمي. محاكاة الاختبار لا تفرض
+  // القواعد، فالمسبار لا يكشف هذا القيد — يُتحقق حياً بعد النشر.
+  // الدوال العامة add/update ترفض META عمداً (انظر أعلاه)، لذا
+  // تُكتب هنا مباشرة عبر doc().set كما يفعل auth.js لـ meta/setup.
+  var DEFAULT_WEEKEND_DAYS = [5, 6];
+  var weekendDaysCache = DEFAULT_WEEKEND_DAYS.slice();
+  var weekendDaysLoadStarted = false;
+  var weekendDaysLoading = null;
+  var weekendListenerStarted = false;
+
+  // تطبيع أيام العطلة: أرقام صحيحة 0–6 مميزة مرتبة؛ يوم واحد على
+  // الأقل (القائمة الفارغة مرفوضة — مستهلكو الإعداد يعاملونها
+  // كغياب إعداد ويعودون للافتراضي). غير صالح ← null.
+  function normalizeWeekendDays(days) {
+    if (!Array.isArray(days)) return null;
+    var seen = {};
+    var out = [];
+    days.forEach(function (d) {
+      var n = (typeof d === 'number') ? d : parseInt(d, 10);
+      if (isFinite(n) && n >= 0 && n <= 6 && !seen[n]) { seen[n] = true; out.push(n); }
+    });
+    out.sort(function (a, b) { return a - b; });
+    return out.length ? out : null;
+  }
+
+  // مستمع حي على meta/general يُبقي الذاكرة محدَّثة عند تغيير أي
+  // منسق آخر للإعداد (يُبدأ مرة واحدة؛ الفشل صامت — القراءة
+  // لمرة واحدة أعلاه تبقى المصدر).
+  function startWeekendListener() {
+    if (weekendListenerStarted) return;
+    weekendListenerStarted = true;
+    try {
+      db().collection(COLLECTIONS.META).doc('general').onSnapshot(function (snap) {
+        try {
+          if (snap && snap.exists) {
+            var days = normalizeWeekendDays((snap.data() || {}).weekendDays);
+            if (days) weekendDaysCache = days;
+          }
+        } catch (e) { /* تبقى الذاكرة كما هي */ }
+      });
+    } catch (e) { /* بلا مستمع — لا شيء يتعطل */ }
+  }
+
+  // تحميل أيام العطلة من meta/general (وعد) — يحدّث الذاكرة ويبدأ
+  // المستمع الحي. مستند غائب أو قراءة فاشلة ← الافتراضي.
+  function loadWeekendDays() {
+    if (weekendDaysLoading) return weekendDaysLoading;
+    try {
+      weekendDaysLoading = db().collection(COLLECTIONS.META).doc('general').get().then(function (snap) {
+        weekendDaysLoading = null;
+        if (snap && snap.exists) {
+          var days = normalizeWeekendDays((snap.data() || {}).weekendDays);
+          if (days) weekendDaysCache = days;
+        }
+        startWeekendListener();
+        return weekendDaysCache.slice();
+      }).catch(function (err) {
+        weekendDaysLoading = null;
+        console.warn('[تدريب] تعذّر قراءة أيام العطلة الأسبوعية — يُستخدم الافتراضي (جمعة + سبت):', err && err.message);
+        return weekendDaysCache.slice();
+      });
+    } catch (err) {
+      weekendDaysLoading = null;
+      return Promise.resolve(weekendDaysCache.slice());
+    }
+    return weekendDaysLoading;
+  }
+
+  // قراءة متزامنة من الذاكرة (افتراضي [5، 6])؛ أول استدعاء يبدأ
+  // التحميل في الخلفية. نسخة جديدة في كل مرة (لا تُعدَّل الذاكرة).
+  function getWeekendDays() {
+    if (!weekendDaysLoadStarted) {
+      weekendDaysLoadStarted = true;
+      try { loadWeekendDays(); } catch (e) { /* الافتراضي يبقى */ }
+    }
+    return weekendDaysCache.slice();
+  }
+
+  // حفظ أيام العطلة الأسبوعية في meta/general (مدير فقط عبر
+  // الشاشة؛ هنا فحص الكتابة العام). الذاكرة تُحدَّث بعد نجاح
+  // الكتابة فقط — الفشل (ومنها رفض القواعد) يرفض الوعد ولا يغيّر
+  // شيئاً. تُسجَّل في سجل التدقيق.
+  function setWeekendDays(days) {
+    var normalized = normalizeWeekendDays(days);
+    if (!normalized) {
+      return Promise.reject(new Error('اختر يوماً واحداً على الأقل للعطلة الأسبوعية'));
+    }
+    try { requireWrite(); } catch (e) { return Promise.reject(e); }
+    return db().collection(COLLECTIONS.META).doc('general').set(
+      { weekendDays: normalized }, { merge: true }
+    ).then(function () {
+      weekendDaysCache = normalized;
+      startWeekendListener();
+      logAudit('update', COLLECTIONS.META, 'general', 'تعديل أيام العطلة الأسبوعية');
+      return weekendDaysCache.slice();
+    });
+  }
+
   window.TadreebDB = {
     COLLECTIONS: COLLECTIONS,
     ATTENDANCE_STATUSES: ATTENDANCE_STATUSES,
@@ -1282,6 +1463,19 @@
     courseBudgetSummary: courseBudgetSummary,
     logAudit: logAudit,
     subscribe: subscribe,
+    // أنواع القاعات والدورات + أيام العطلة الأسبوعية (v2.3 — W3).
+    HALL_TYPES: HALL_TYPES,
+    COURSE_TYPES: COURSE_TYPES,
+    HALL_TYPE_LABELS: HALL_TYPE_LABELS,
+    COURSE_TYPE_LABELS: COURSE_TYPE_LABELS,
+    hallTypeOf: hallTypeOf,
+    courseTypeOf: courseTypeOf,
+    hallTypeForCourseType: hallTypeForCourseType,
+    matchingHalls: matchingHalls,
+    DEFAULT_WEEKEND_DAYS: DEFAULT_WEEKEND_DAYS,
+    getWeekendDays: getWeekendDays,
+    loadWeekendDays: loadWeekendDays,
+    setWeekendDays: setWeekendDays,
     // أدوات تواريخ مكشوفة للواجهة (تنسيق موحّد YYYY-MM-DD).
     dateStr: dateStr,
     parseDate: parseDate,

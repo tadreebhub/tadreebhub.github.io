@@ -4,11 +4,15 @@
  * لا تعتمد على Firebase ولا على أي وحدة أخرى في التطبيق.
  * جميع العناوين والتسميات بالعربية الفصحى. أسماء الملفات ASCII آمنة.
  *
- * التنسيق الاحترافي (كل ورقة في كل مصنّف):
+ * التنسيق الاحترافي (كل ورقة في كل مصنّف — v2.3):
  * الصف 1: عنوان — عريض 14 نقطة بلون كحلي. الصف 2: سطر الإنشاء.
- * الصف 3: صف العناوين — تعبئة كحلية، نص أبيض عريض، في المنتصف.
- * البيانات من الصف 4. تجميد أسفل صف العناوين، حدود رفيعة،
- * أرقام بفواصل الآلاف، اتجاه RTL، إعداد طباعة جاهز.
+ * الصف 3: سطر التفاصيل — التصفية المطبقة («بدون تصفية» إن لم
+ * توجد) وعدد الصفوف والإجماليات حيث توجد. الصف 4: صف العناوين —
+ * تعبئة كحلية، نص أبيض عريض، في المنتصف. البيانات من الصف 5.
+ * تجميد أسفل صف العناوين، حدود رفيعة، أرقام بفواصل الآلاف،
+ * اتجاه RTL، إعداد طباعة جاهز. صفوف كل قسم مرتبة بترتيب منطقي
+ * (بالتاريخ ثم الوقت للجلسات والاجتماعات والمصاريف، وبالاسم
+ * لقوائم الأشخاص والدورات — انظر كل دالة تصدير).
  */
 (function () {
   'use strict';
@@ -20,6 +24,13 @@
   var BORDER_GREY = 'FFBFBFBF';
   var NUM_FMT = '#,##0';
   var MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  /* ---------- تخطيط الورقة (v2.3 — L) ----------
+   * الصف 1: العنوان. الصف 2: سطر الإنشاء (+ النطاق). الصف 3: سطر
+   * التفاصيل. الصف 4: صف العناوين. البيانات من الصف 5. */
+  var DETAILS_ROW = 3;
+  var HEADER_ROW = 4;
+  var DATA_ROW = 5;
 
   /* ---------- تفضيلات تنسيق التصدير ---------- */
   // تُقرأ من opts.fmt عند تمريرها، وإلا من UI.getSetting('exportFmt') في
@@ -102,8 +113,17 @@
     return hhmm;
   }
 
-  // التاريخ والوقت الآن: YYYY-MM-DD + وقت بنظام 12 ساعة
+  // التاريخ والوقت الآن: YYYY-MM-DD + وقت بنظام 12 ساعة — بتوقيت
+  // دمشق عبر TadreebTime عند توفره (المتصفح)، وإلا توقيت الجهاز
+  // المحلي (اختبار Node — يُشغَّل مع TZ=Asia/Damascus).
   function nowString() {
+    try {
+      if (typeof window !== 'undefined' && window.TadreebTime &&
+          typeof window.TadreebTime.todayISO === 'function' &&
+          typeof window.TadreebTime.formatTime === 'function') {
+        return window.TadreebTime.todayISO() + ' ' + window.TadreebTime.formatTime(new Date());
+      }
+    } catch (e) { /* احتياطي أدناه */ }
     var d = new Date();
     var hh = String(d.getHours()).padStart(2, '0');
     var mm = String(d.getMinutes()).padStart(2, '0');
@@ -164,6 +184,35 @@
     return v == null ? '' : String(v);
   }
 
+  /* ---------- مقارنات الفرز (v2.3 — L) ---------- */
+  // مقارنة نصية بالترتيب العربي (localeCompare('ar') مع احتياطي).
+  function cmpText(a, b) {
+    var sa = String(a == null ? '' : a), sb = String(b == null ? '' : b);
+    try { return sa.localeCompare(sb, 'ar'); }
+    catch (e) { return sa < sb ? -1 : sa > sb ? 1 : 0; }
+  }
+
+  // مقارنة تاريخين (ISO أو أي صيغة يقبلها isoDateText).
+  function cmpDateVal(a, b) {
+    var da = isoDateText(a), db = isoDateText(b);
+    return da < db ? -1 : da > db ? 1 : 0;
+  }
+
+  // دقائق بداية الوقت من نصوص «09:00–11:00» أو «09:00 ص - 11:00 ص»
+  // أو «09:00»؛ نص بلا وقت يُعامل كآخر اليوم.
+  function startMinutes(text) {
+    var m = /(\d{1,2}):(\d{2})\s*(ص|م)?/.exec(String(text == null ? '' : text));
+    if (!m) return 9999;
+    var h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+    if (m[3] === 'م' && h < 12) h += 12;
+    if (m[3] === 'ص' && h === 12) h = 0;
+    return h * 60 + min;
+  }
+
+  function cmpTimeText(a, b) {
+    return startMinutes(a) - startMinutes(b);
+  }
+
   // رقم منسّق لتضمينه داخل نص — حسب تفضيلات التصدير (فاصل الآلاف
   // والأرقام المشرقية). الخلايا الرقمية في إكسل تبقى أرقاماً حقيقية
   // (لتبقى قابلة للجمع والفرز)؛ فاصل الآلاف فيها عبر numFmt في
@@ -192,6 +241,18 @@
     return '';
   }
 
+  // تسمية حالة الحضور المعروضة (v2.3): القيم الإنكليزية الخام
+  // تُترجم (ملغي/لم يحضر)، والتسميات العربية تمر كما هي — فالسجلات
+  // الإرثية تحتفظ بتسمياتها الأصلية في التصدير.
+  function attStatusLabel(s) {
+    if (s === 'cancelled') return 'ملغي';
+    if (s === 'did-not-attend') return 'لم يحضر';
+    if (s === 'present') return 'موجود';
+    if (s === 'absent') return 'غائب';
+    if (s === 'excused') return 'معتذر';
+    return asText(s);
+  }
+
   // الأجر المستحق للمدرب من عقد التعاقد (ثابت أو بالساعة) — أو null عند غياب العقد
   function trainerFeeDue(contract) {
     contract = contract || {};
@@ -206,7 +267,7 @@
   function trainerFeeText(contract) {
     contract = contract || {};
     if (contract.type === 'fixed') {
-      return 'أجرة ثابتة للدورة كاملة: ' + fmtNumber(contract.amount) + ' ل.س';
+      return 'أجرة ثابتة لمجموعة التدريب كاملة: ' + fmtNumber(contract.amount) + ' ل.س';
     }
     if (contract.type === 'hourly') {
       return 'أجر بالساعة: ' + fmtNumber(contract.rate) + ' ل.س — إجمالي الساعات: ' +
@@ -217,10 +278,10 @@
   }
 
   // عناوين ورقة المجموعات التدريبية (مشتركة بين الدليل والنسخة الاحتياطية)
-  var GROUP_HEADERS = ['اسم المجموعة', 'المديرية', 'عدد الدورات', 'الملاحظة'];
+  var GROUP_HEADERS = ['اسم المجموعة', 'المديرية', 'عدد مجموعات التدريب', 'الملاحظة'];
 
   // صفوف ورقة المجموعات التدريبية من {name, directorate, courses, note}
-  // عدد الدورات رقم دائماً: رقم مباشر، أو طول المصفوفة إن كانت قائمة دورات
+  // عدد مجموعات التدريب رقم دائماً: رقم مباشر، أو طول المصفوفة إن كانت قائمة مجموعات تدريب
   function groupRows(groups) {
     return (Array.isArray(groups) ? groups : []).map(function (g) {
       g = g || {};
@@ -257,10 +318,23 @@
     };
   }
 
-  // إنشاء ورقة مع كتلة العنوان: الصف 1 عنوان، الصف 2 سطر الإنشاء (+ نطاق)
-  // عند إيقاف «تضمين صف العنوان» يُترك الصف 1 فارغاً ويبقى سطر الإنشاء
-  // وصف العناوين (3) والتجميد كما هي تماماً.
-  function createSheet(wb, name, title, subtitle, colCount) {
+  // سطر التفاصيل (v2.3 — L): «التصفية: … — عدد الصفوف: N — إجماليات…».
+  // filters: نص التصفية المطبقة؛ بلا نص يُستخدم subtitle (النطاق)
+  // إن وُجد، وإلا «بدون تصفية». count: عدد صفوف البيانات (null
+  // يُحذف الجزء). totals: نص إجماليات اختياري جاهز.
+  function buildDetailsText(filters, subtitle, count, totals) {
+    var parts = ['التصفية: ' + (filters || subtitle || 'بدون تصفية')];
+    if (count != null) parts.push('عدد الصفوف: ' + fmtNumber(count));
+    if (totals) parts.push(totals);
+    return parts.join(' — ');
+  }
+
+  // إنشاء ورقة مع كتلة العنوان: الصف 1 عنوان، الصف 2 سطر الإنشاء
+  // (+ نطاق)، الصف 3 سطر التفاصيل. عند إيقاف «تضمين صف العنوان»
+  // يُترك الصف 1 فارغاً ويبقى سطر الإنشاء وسطر التفاصيل وصف
+  // العناوين (4) والتجميد كما هي تماماً. details: نص سطر التفاصيل
+  // الجاهز (يُبنى افتراضياً من subtitle بلا عدد).
+  function createSheet(wb, name, title, subtitle, colCount, details) {
     var ws = wb.addWorksheet(name);
     var gen = 'تاريخ الإنشاء: ' + nowString();
     if (subtitle) gen += ' — ' + subtitle;
@@ -278,6 +352,12 @@
     genCell.font = { name: 'Calibri', size: 10, color: { argb: GREY } };
     genCell.alignment = { horizontal: 'right', vertical: 'middle' };
     ws.getRow(2).height = 18;
+    if (colCount > 1) ws.mergeCells(DETAILS_ROW, 1, DETAILS_ROW, colCount);
+    var detailsCell = ws.getCell(DETAILS_ROW, 1);
+    detailsCell.value = details || buildDetailsText(null, subtitle, null, null);
+    detailsCell.font = { name: 'Calibri', size: 10, color: { argb: GREY } };
+    detailsCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    ws.getRow(DETAILS_ROW).height = 18;
     return ws;
   }
 
@@ -308,11 +388,11 @@
     });
   }
 
-  // ملاءمة عرض الأعمدة من أطول محتوى (الصفوف من 3 فصاعداً؛ حد أدنى 12، حد أقصى 42)
+  // ملاءمة عرض الأعمدة من أطول محتوى (من صف العناوين فصاعداً؛ حد أدنى 12، حد أقصى 42)
   function fitWidths(ws, colCount) {
     for (var c = 1; c <= colCount; c++) {
       var maxLen = 0;
-      for (var r = 3; r <= ws.rowCount; r++) {
+      for (var r = HEADER_ROW; r <= ws.rowCount; r++) {
         var v = ws.getRow(r).getCell(c).value;
         if (v == null || v === '') continue;
         var len = (typeof v === 'number') ? fmtNumber(v).length : String(v).length;
@@ -325,22 +405,29 @@
   // إنهاء الورقة: عرض الأعمدة + تجميد أسفل صف العناوين + RTL + إعداد طباعة
   function finishSheet(ws, colCount) {
     fitWidths(ws, colCount);
-    ws.views = [{ state: 'frozen', ySplit: 3, rightToLeft: true }];
+    ws.views = [{ state: 'frozen', ySplit: HEADER_ROW, rightToLeft: true }];
     ws.pageSetup = {
       orientation: colCount > 5 ? 'landscape' : 'portrait',
       fitToPage: true,
       fitToWidth: 1,
       fitToHeight: 0,
-      paperSize: 9
+      paperSize: 9,
+      // تكرار صفوف العنوان/التفاصيل/الترويسة في كل صفحة مطبوعة.
+      // (اسم الخاصية في حزمة ExcelJS هذه: printTitlesRow — المفرد؛
+      // السطر القديم ws.printTitleRows كان لا يفعل شيئاً.)
+      printTitlesRow: '1:' + HEADER_ROW
     };
-    ws.printTitleRows = '1:3';
   }
 
-  // ورقة جدول كاملة دفعة واحدة (عنوان + إنشاء + عناوين + بيانات)
-  function addTableSheet(wb, name, title, subtitle, headers, rows) {
-    var ws = createSheet(wb, name, title, subtitle, headers.length);
-    writeHeaderRow(ws, 3, headers);
-    rows.forEach(function (values, i) { writeDataRow(ws, 4 + i, values); });
+  // ورقة جدول كاملة دفعة واحدة (عنوان + إنشاء + تفاصيل + عناوين +
+  // بيانات). extra اختياري: {filters, totals} — يُبنى سطر التفاصيل
+  // تلقائياً (التصفية + عدد الصفوف + الإجماليات).
+  function addTableSheet(wb, name, title, subtitle, headers, rows, extra) {
+    extra = extra || {};
+    var ws = createSheet(wb, name, title, subtitle, headers.length,
+      buildDetailsText(extra.filters, subtitle, rows.length, extra.totals));
+    writeHeaderRow(ws, HEADER_ROW, headers);
+    rows.forEach(function (values, i) { writeDataRow(ws, DATA_ROW + i, values); });
     finishSheet(ws, headers.length);
     return ws;
   }
@@ -389,31 +476,37 @@
   function exportAttendance(opts) {
     opts = opts || {};
     activeFmt = resolveFmt(opts);
-    var rows = Array.isArray(opts.rows) ? opts.rows : [];
+    // الترتيب: بالاسم (قائمة أشخاص).
+    var rows = (Array.isArray(opts.rows) ? opts.rows : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var wb = newWorkbook();
 
-    var present = 0, absent = 0, excused = 0;
+    var present = 0, absent = 0, excused = 0, cancelled = 0;
     rows.forEach(function (r) {
-      if (r.status === 'موجود') present++;
-      else if (r.status === 'غائب') absent++;
-      else if (r.status === 'معتذر') excused++;
+      var st = attStatusLabel(r.status);
+      if (st === 'موجود') present++;
+      else if (st === 'غائب' || st === 'لم يحضر') absent++;
+      else if (st === 'معتذر') excused++;
+      else if (st === 'ملغي') cancelled++;
     });
 
-    var scope = 'الدورة: ' + asText(opts.courseName);
+    var scope = 'مجموعة التدريب: ' + asText(opts.displayName || opts.courseName);
     if (opts.sessionDate) scope += ' — التاريخ: ' + asDateText(opts.sessionDate);
     if (opts.periodLabel) scope += ' — الفترة: ' + asText(opts.periodLabel);
     if (opts.hallName) scope += ' — القاعة: ' + asText(opts.hallName);
     if (opts.trainerName) scope += ' — المدرب: ' + asText(opts.trainerName);
 
     var headers = ['الرقم', 'الاسم', 'المديرية', 'الحالة', 'المبرر', 'تاريخ الجلسة', 'الفترة', 'القاعة', 'المدرب', 'الملاحظة'];
-    var ws = createSheet(wb, 'الحضور', 'سجل الحضور والغياب', scope, headers.length);
-    writeHeaderRow(ws, 3, headers);
+    var ws = createSheet(wb, 'الحضور', 'سجل الحضور والغياب', scope, headers.length,
+      buildDetailsText(scope, null, rows.length, null));
+    writeHeaderRow(ws, HEADER_ROW, headers);
     rows.forEach(function (r, i) {
-      writeDataRow(ws, 4 + i, [
+      writeDataRow(ws, DATA_ROW + i, [
         i + 1,
         asText(r.name),
         asText(r.directorate),
-        asText(r.status),
+        attStatusLabel(r.status),
         justificationOf(r),
         asDateText(r.sessionDate || opts.sessionDate),
         asText(r.period || opts.periodLabel),
@@ -425,12 +518,13 @@
     });
 
     // كتلة الملخص أسفل الجدول
-    var next = 4 + rows.length + 1;
+    var next = DATA_ROW + rows.length + 1;
     writeHeaderRow(ws, next, ['الملخص', 'العدد']);
     writeDataRow(ws, next + 1, ['إجمالي المتدربين', rows.length]);
     writeDataRow(ws, next + 2, ['موجود', present]);
     writeDataRow(ws, next + 3, ['غائب', absent]);
     writeDataRow(ws, next + 4, ['معتذر', excused]);
+    writeDataRow(ws, next + 5, ['ملغي', cancelled]);
 
     finishSheet(ws, headers.length);
     var filename = 'tadreeb-attendance-' + sanitizeFilename(opts.courseName) +
@@ -442,33 +536,44 @@
   function exportAttendanceReport(data) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var sessions = Array.isArray(data.sessions) ? data.sessions.slice() : [];
-    sessions.sort(function (a, b) {
-      var da = isoDateText((a || {}).sessionDate), db = isoDateText((b || {}).sessionDate);
-      return da < db ? -1 : da > db ? 1 : 0;
+    // الترتيب: الجلسات بالتاريخ، وصفوف كل جلسة بالاسم.
+    // (نسخ محلية — لا تُمسّ بيانات المتصل.)
+    var sessions = (Array.isArray(data.sessions) ? data.sessions : []).map(function (s) {
+      var copy = Object.assign({}, s || {});
+      copy.rows = (Array.isArray(copy.rows) ? copy.rows : []).slice().sort(function (a, b) {
+        return cmpText((a || {}).name, (b || {}).name);
+      });
+      return copy;
     });
+    sessions.sort(function (a, b) {
+      return cmpDateVal((a || {}).sessionDate, (b || {}).sessionDate);
+    });
+    var totalRows = 0;
+    sessions.forEach(function (s) { totalRows += s.rows.length; });
     var wb = newWorkbook();
 
-    var scope = 'الدورة: ' + asText(data.courseName);
+    var scope = 'مجموعة التدريب: ' + asText(data.displayName || data.courseName);
     if (data.groupName) scope += ' — المجموعة: ' + asText(data.groupName);
 
     var headers = ['التاريخ', 'الفترة', 'الاسم', 'المديرية', 'الحالة', 'المبرر', 'الملاحظة'];
-    var ws = createSheet(wb, 'الحضور والغياب', 'سجل الحضور والغياب', scope, headers.length);
-    writeHeaderRow(ws, 3, headers);
+    var ws = createSheet(wb, 'الحضور والغياب', 'سجل الحضور والغياب', scope, headers.length,
+      buildDetailsText(scope, null, totalRows, null));
+    writeHeaderRow(ws, HEADER_ROW, headers);
 
-    var rowNum = 4;
-    var totals = { present: 0, absent: 0, excused: 0, unrecorded: 0 };
+    var rowNum = DATA_ROW;
+    var totals = { present: 0, absent: 0, excused: 0, cancelled: 0, unrecorded: 0 };
     var perSession = [];
     sessions.forEach(function (s) {
       s = s || {};
       var rows = Array.isArray(s.rows) ? s.rows : [];
-      var counts = { present: 0, absent: 0, excused: 0, unrecorded: 0 };
+      var counts = { present: 0, absent: 0, excused: 0, cancelled: 0, unrecorded: 0 };
       rows.forEach(function (r) {
         r = r || {};
-        var st = r.status ? asText(r.status) : 'بلا تسجيل';
+        var st = r.status ? attStatusLabel(r.status) : 'بلا تسجيل';
         if (st === 'موجود') counts.present++;
-        else if (st === 'غائب') counts.absent++;
+        else if (st === 'غائب' || st === 'لم يحضر') counts.absent++;
         else if (st === 'معتذر') counts.excused++;
+        else if (st === 'ملغي') counts.cancelled++;
         else counts.unrecorded++;
         writeDataRow(ws, rowNum, [
           asDateText(s.sessionDate),
@@ -486,23 +591,24 @@
       totals.present += counts.present;
       totals.absent += counts.absent;
       totals.excused += counts.excused;
+      totals.cancelled += counts.cancelled;
       totals.unrecorded += counts.unrecorded;
     });
 
     // كتلة الملخص أسفل الجدول: عدد كل جلسة ثم الإجمالي الكلي
     var next = rowNum + 1;
-    writeHeaderRow(ws, next, ['الملخص', 'موجود', 'غائب', 'معتذر', 'بلا تسجيل', 'الإجمالي']);
+    writeHeaderRow(ws, next, ['الملخص', 'موجود', 'غائب', 'معتذر', 'ملغي', 'بلا تسجيل', 'الإجمالي']);
     perSession.forEach(function (ps, i) {
       var c = ps.counts;
       writeDataRow(ws, next + 1 + i, [
         'جلسة ' + ps.date,
-        c.present, c.absent, c.excused, c.unrecorded,
-        c.present + c.absent + c.excused + c.unrecorded
+        c.present, c.absent, c.excused, c.cancelled, c.unrecorded,
+        c.present + c.absent + c.excused + c.cancelled + c.unrecorded
       ]);
     });
-    var grand = totals.present + totals.absent + totals.excused + totals.unrecorded;
+    var grand = totals.present + totals.absent + totals.excused + totals.cancelled + totals.unrecorded;
     writeDataRow(ws, next + 1 + perSession.length, [
-      'الإجمالي', totals.present, totals.absent, totals.excused, totals.unrecorded, grand
+      'الإجمالي', totals.present, totals.absent, totals.excused, totals.cancelled, totals.unrecorded, grand
     ]);
 
     finishSheet(ws, headers.length);
@@ -515,7 +621,11 @@
   function exportToday(opts) {
     opts = opts || {};
     activeFmt = resolveFmt(opts);
-    var sessions = Array.isArray(opts.sessions) ? opts.sessions : [];
+    // الترتيب: بوقت البدء ثم اسم الفترة.
+    var sessions = (Array.isArray(opts.sessions) ? opts.sessions : []).slice().sort(function (a, b) {
+      var t = cmpTimeText((a || {}).time, (b || {}).time);
+      return t !== 0 ? t : cmpText((a || {}).period, (b || {}).period);
+    });
     var wb = newWorkbook();
 
     var rows = sessions.map(function (s) {
@@ -528,13 +638,15 @@
     return writeWorkbook(wb, filename);
   }
 
-  /* ---------- 3. تصدير ملف الدورة ---------- */
+  /* ---------- 3. تصدير ملف مجموعة التدريب ---------- */
 
   function addCourseInfoSheet(wb, data) {
     var info = data.info || {};
     var directorates = Array.isArray(info.directorates) ? info.directorates.join('، ') : asText(info.directorates);
     var rows = [
+      ['اسم مجموعة التدريب', asText(info.displayName || info.name)],
       ['اسم الدورة', asText(info.name)],
+      ['رقم المجموعة', info.groupNumber != null ? asNumber(info.groupNumber) : ''],
       ['المعرّف', asText(info.code)],
       ['المستوى', asText(info.level)],
       ['المدرب', asText(info.trainer)],
@@ -543,17 +655,24 @@
       ['عقد المدرب', trainerFeeText(info.trainerContract)],
       ['الأيام', asText(info.days)],
       ['الفترة التدريبية', asText(info.period)],
-      ['تاريخ بدء الدورة', asDateText(info.startDate)],
+      ['تاريخ بدء مجموعة التدريب', asDateText(info.startDate)],
       ['عدد الجلسات', info.sessionCount != null ? asNumber(info.sessionCount) : ''],
       ['الميزانية (ل.س)', info.budget != null ? asNumber(info.budget) : ''],
       ['الحالة', asText(info.status)],
       ['المديريات', directorates]
     ];
-    addTableSheet(wb, 'المعلومات', 'ملف الدورة', asText(info.name), ['البند', 'التفاصيل'], rows);
+    addTableSheet(wb, 'المعلومات', 'ملف مجموعة التدريب', asText(info.displayName || info.name), ['البند', 'التفاصيل'], rows);
   }
 
   function addCourseScheduleSheet(wb, data) {
-    var schedule = Array.isArray(data.schedule) ? data.schedule : [];
+    // الترتيب: بالتاريخ ثم الرقم التسلسلي.
+    var schedule = (Array.isArray(data.schedule) ? data.schedule : []).slice().sort(function (a, b) {
+      var d = cmpDateVal((a || {}).date, (b || {}).date);
+      if (d !== 0) return d;
+      var na = (a && a.n != null) ? asNumber(a.n) : 9999;
+      var nb = (b && b.n != null) ? asNumber(b.n) : 9999;
+      return na - nb;
+    });
     var rows = schedule.map(function (s, i) {
       return [
         s.n != null ? s.n : i + 1,
@@ -566,33 +685,40 @@
         asText(s.note)
       ];
     });
-    addTableSheet(wb, 'الجدول', 'جدول الجلسات', asText((data.info || {}).name),
+    addTableSheet(wb, 'الجدول', 'جدول الجلسات', asText((data.info || {}).displayName || (data.info || {}).name),
       ['الرقم', 'التاريخ', 'اليوم', 'الفترة', 'القاعة', 'المدرب', 'الحالة', 'الملاحظة'], rows);
   }
 
   function addCourseTraineesSheet(wb, data) {
-    var trainees = Array.isArray(data.trainees) ? data.trainees : [];
+    // الترتيب: بالاسم.
+    var trainees = (Array.isArray(data.trainees) ? data.trainees : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var rows = trainees.map(function (t, i) {
       // بلا عمود حالة: حالة المتدرب لا تُصدَّر بعد الآن (بند 9 — الحالة
       // موجودة فقط في تفقد الجلسة)؛ القيم المخزَّنة القديمة تبقى في قاعدة البيانات.
       return [i + 1, asText(t.name), asText(t.directorate), asText(t.phone), asText(t.notes || t.note)];
     });
-    addTableSheet(wb, 'المتدربون', 'المتدربون', asText((data.info || {}).name),
+    addTableSheet(wb, 'المتدربون', 'المتدربون', asText((data.info || {}).displayName || (data.info || {}).name),
       ['الرقم', 'الاسم', 'المديرية', 'رقم الهاتف', 'الملاحظات'], rows);
   }
 
   function addCourseAttendanceSheet(wb, data) {
-    var attendance = Array.isArray(data.attendance) ? data.attendance : [];
+    // الترتيب: بالتاريخ ثم اسم المتدرب.
+    var attendance = (Array.isArray(data.attendance) ? data.attendance : []).slice().sort(function (a, b) {
+      var d = cmpDateVal((a || {}).sessionDate, (b || {}).sessionDate);
+      return d !== 0 ? d : cmpText((a || {}).traineeName, (b || {}).traineeName);
+    });
     var rows = attendance.map(function (a) {
       return [
         asDateText(a.sessionDate),
         asText(a.traineeName),
-        asText(a.status),
+        attStatusLabel(a.status),
         justificationOf(a),
         a.status === 'معتذر' ? '' : asText(a.note)
       ];
     });
-    addTableSheet(wb, 'الحضور', 'سجل الحضور', asText((data.info || {}).name),
+    addTableSheet(wb, 'الحضور', 'سجل الحضور', asText((data.info || {}).displayName || (data.info || {}).name),
       ['التاريخ', 'اسم المتدرب', 'الحالة', 'المبرر', 'الملاحظة'], rows);
   }
 
@@ -604,8 +730,11 @@
     var feeDue = budget.trainerFeeDue != null ? asNumber(budget.trainerFeeDue) : trainerFeeDue(contract);
     var recordedFee = byCategory['أجور المدربين'] != null ? asNumber(byCategory['أجور المدربين']) : null;
     var colCount = expenses ? 4 : 2;
-    var ws = createSheet(wb, name, title, subtitle, colCount);
-    var r = 3;
+    var ws = createSheet(wb, name, title, subtitle, colCount,
+      buildDetailsText(null, subtitle, null,
+        'الميزانية المخصصة: ' + fmtNumber(budget.allocated) + ' ل.س — إجمالي المصروف: ' +
+        fmtNumber(budget.totalSpent) + ' ل.س — المتبقي: ' + fmtNumber(budget.remaining) + ' ل.س'));
+    var r = HEADER_ROW;
     writeHeaderRow(ws, r, ['البند', 'المبلغ (ل.س)']);
     r++;
     var summary = [
@@ -619,14 +748,16 @@
     r++; // صف فارغ
     writeHeaderRow(ws, r, ['الفئة', 'المصروف (ل.س)']);
     r++;
-    Object.keys(byCategory).forEach(function (cat) {
+    // الفئات مرتبة بالاسم.
+    Object.keys(byCategory).sort(cmpText).forEach(function (cat) {
       writeDataRow(ws, r, [cat, asNumber(byCategory[cat])]); r++;
     });
     if (expenses) {
       r++; // صف فارغ
       writeHeaderRow(ws, r, ['التاريخ', 'الفئة', 'البيان', 'المبلغ (ل.س)']);
       r++;
-      expenses.forEach(function (e) {
+      // المصاريف مرتبة بالتاريخ.
+      expenses.slice().sort(function (a, b) { return cmpDateVal((a || {}).date, (b || {}).date); }).forEach(function (e) {
         writeDataRow(ws, r, [asDateText(e.date), asText(e.category), asText(e.description), asNumber(e.amount)]); r++;
       });
     }
@@ -647,7 +778,7 @@
     if (include('attendance')) addCourseAttendanceSheet(wb, data);
     if (include('budget')) {
       var budget = data.budget || {};
-      addBudgetSheet(wb, 'الميزانية', 'ميزانية الدورة', asText((data.info || {}).name),
+      addBudgetSheet(wb, 'الميزانية', 'ميزانية مجموعة التدريب', asText((data.info || {}).displayName || (data.info || {}).name),
         budget, (data.info || {}).trainerContract, Array.isArray(budget.expenses) ? budget.expenses : []);
     }
     return wb;
@@ -694,14 +825,16 @@
 
     var header = ['الفترة'];
     days.forEach(function (d) { header.push(asText(d.label) + (d.date ? ' — ' + asDateText(d.date) : '')); });
-    var ws = createSheet(wb, 'كالندر الأسبوع', 'كالندر الأسبوع', asText(opts.weekLabel), header.length);
-    writeHeaderRow(ws, 3, header);
+    // شبكة موضعية (صف لكل فترة) — بلا فرز.
+    var ws = createSheet(wb, 'كالندر الأسبوع', 'كالندر الأسبوع', asText(opts.weekLabel), header.length,
+      buildDetailsText(asText(opts.weekLabel), null, periods.length, null));
+    writeHeaderRow(ws, HEADER_ROW, header);
     periods.forEach(function (p, pi) {
       var row = [asText(p.label) + (p.time ? ' (' + asText(p.time) + ')' : '')];
       days.forEach(function (d, di) {
         row.push(formatWeekCell(cells[pi + '|' + di]));
       });
-      writeDataRow(ws, 4 + pi, row);
+      writeDataRow(ws, DATA_ROW + pi, row);
     });
     finishSheet(ws, header.length);
 
@@ -717,8 +850,10 @@
     var weeks = Array.isArray(opts.weeks) ? opts.weeks : [];
     var wb = newWorkbook();
 
-    var ws = createSheet(wb, 'كالندر الشهر', 'كالندر الشهر', asText(opts.monthLabel), 7);
-    writeHeaderRow(ws, 3, ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']);
+    // شبكة موضعية (صف لكل أسبوع) — بلا فرز.
+    var ws = createSheet(wb, 'كالندر الشهر', 'كالندر الشهر', asText(opts.monthLabel), 7,
+      buildDetailsText(asText(opts.monthLabel), null, weeks.length, null));
+    writeHeaderRow(ws, HEADER_ROW, ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']);
     weeks.forEach(function (week, wi) {
       var row = [];
       for (var i = 0; i < 7; i++) {
@@ -738,7 +873,7 @@
           row.push(text);
         }
       }
-      writeDataRow(ws, 4 + wi, row);
+      writeDataRow(ws, DATA_ROW + wi, row);
     });
     finishSheet(ws, 7);
 
@@ -764,12 +899,21 @@
     var dateIso = isoDateText(opts.date) || (days[0] ? isoDateText(days[0].date) : todayString());
     var wb = newWorkbook();
 
-    var headers = ['الفترة', 'الدورة', 'المدرب', 'القاعة', 'الحالة'];
-    var ws = createSheet(wb, 'جدول اليوم', 'جدول يوم ' + date, asText(opts.label), headers.length);
-    writeHeaderRow(ws, 3, headers);
-    var row = 4;
+    // الترتيب: مدخلات اليوم بوقت البدء.
+    var totalEntries = 0;
     days.forEach(function (day) {
-      var entries = Array.isArray(day.sessions) ? day.sessions : [];
+      totalEntries += Array.isArray(day.sessions) ? day.sessions.length : 0;
+    });
+    var headers = ['الفترة', 'الدورة', 'المدرب', 'القاعة', 'الحالة'];
+    var ws = createSheet(wb, 'جدول اليوم', 'جدول يوم ' + date, asText(opts.label), headers.length,
+      buildDetailsText(asText(opts.label) || ('التاريخ: ' + date), null, totalEntries, null));
+    writeHeaderRow(ws, HEADER_ROW, headers);
+    var row = DATA_ROW;
+    days.forEach(function (day) {
+      var entries = (Array.isArray(day.sessions) ? day.sessions : []).slice().sort(function (a, b) {
+        var t = cmpTimeText((a || {}).time, (b || {}).time);
+        return t !== 0 ? t : cmpText((a || {}).course || (a || {}).title, (b || {}).course || (b || {}).title);
+      });
       entries.forEach(function (e) {
         var period = asText(e.period) + (e.time ? ' (' + asText(e.time) + ')' : '');
         if (e.kind === 'meeting') {
@@ -799,12 +943,21 @@
     var toIso = isoDateText(opts.to) || (days.length ? isoDateText(days[days.length - 1].date) : fromIso);
     var wb = newWorkbook();
 
-    var headers = ['التاريخ', 'الفترة', 'الدورة', 'المدرب', 'القاعة', 'الحالة'];
-    var ws = createSheet(wb, 'جدول النطاق', 'جدول النطاق ' + from + ' — ' + to, '', headers.length);
-    writeHeaderRow(ws, 3, headers);
-    var row = 4;
+    // الترتيب: الأيام بالتاريخ (أعلاه)، ومدخلات كل يوم بوقت البدء.
+    var rangeEntries = 0;
     days.forEach(function (day) {
-      var entries = Array.isArray(day.sessions) ? day.sessions : [];
+      rangeEntries += Array.isArray(day.sessions) ? day.sessions.length : 0;
+    });
+    var headers = ['التاريخ', 'الفترة', 'الدورة', 'المدرب', 'القاعة', 'الحالة'];
+    var ws = createSheet(wb, 'جدول النطاق', 'جدول النطاق ' + from + ' — ' + to, '', headers.length,
+      buildDetailsText('النطاق: ' + from + ' — ' + to, null, rangeEntries, null));
+    writeHeaderRow(ws, HEADER_ROW, headers);
+    var row = DATA_ROW;
+    days.forEach(function (day) {
+      var entries = (Array.isArray(day.sessions) ? day.sessions : []).slice().sort(function (a, b) {
+        var t = cmpTimeText((a || {}).time, (b || {}).time);
+        return t !== 0 ? t : cmpText((a || {}).course || (a || {}).title, (b || {}).course || (b || {}).title);
+      });
       entries.forEach(function (e) {
         var period = asText(e.period) + (e.time ? ' (' + asText(e.time) + ')' : '');
         if (e.kind === 'meeting') {
@@ -821,9 +974,12 @@
     return writeWorkbook(wb, filename);
   }
 
-  /* ---------- 6. قائمة الدورات ---------- */
+  /* ---------- 6. قائمة مجموعات التدريب ---------- */
   function exportCoursesList(rows) {
-    rows = Array.isArray(rows) ? rows : [];
+    // الترتيب: بالاسم.
+    rows = (Array.isArray(rows) ? rows : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     activeFmt = resolveFmt(null);
     var wb = newWorkbook();
 
@@ -837,6 +993,7 @@
       var remaining = r.remaining != null ? asNumber(r.remaining)
         : ((budget != null && spent != null) ? budget - spent : '');
       return [
+        asText(r.displayName || r.name),
         asText(r.name),
         asText(r.trainer),
         asText(r.days),
@@ -851,26 +1008,38 @@
         remaining
       ];
     });
-    addTableSheet(wb, 'الدورات', 'قائمة الدورات', '',
-      ['اسم الدورة', 'المدرب', 'الأيام', 'الفترة', 'عدد الجلسات', 'المنجزة', 'نسبة الإنجاز %',
-       'الحالة', 'عدد المتدربين', 'الميزانية (ل.س)', 'المصروف (ل.س)', 'المتبقي (ل.س)'], dataRows);
+    var totalBudget = 0, totalSpent = 0, hasMoney = false;
+    rows.forEach(function (r) {
+      if (r.budget != null) { totalBudget += asNumber(r.budget); hasMoney = true; }
+      var sp = r.spent != null ? r.spent : r.totalSpent;
+      if (sp != null) { totalSpent += asNumber(sp); hasMoney = true; }
+    });
+    addTableSheet(wb, 'مجموعات التدريب', 'قائمة مجموعات التدريب', '',
+      ['مجموعة التدريب', 'الدورة', 'المدرب', 'الأيام', 'الفترة', 'عدد الجلسات', 'المنجزة', 'نسبة الإنجاز %',
+       'الحالة', 'عدد المتدربين', 'الميزانية (ل.س)', 'المصروف (ل.س)', 'المتبقي (ل.س)'], dataRows,
+      hasMoney ? { totals: 'إجمالي الميزانيات: ' + fmtNumber(totalBudget) + ' ل.س — إجمالي المصروف: ' + fmtNumber(totalSpent) + ' ل.س' } : null);
     var filename = 'tadreeb-courses-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
   }
 
-  /* ---------- إحصائيات الدورات (إدارة الدورات v1.1) ---------- */
+  /* ---------- إحصائيات مجموعات التدريب (إدارة مجموعات التدريب v1.1) ---------- */
   // data: {courses: [{name, code, level, group, trainer, directorate, startDate,
   // total, done, remaining, pct, trainees, attendanceRate, budget, spent,
   // budgetRemaining}], summary: {...}} — كما يبنيه App.buildCoursesStatsData.
   // النسب أرقام عادية مع «%» في الترويسة (كما في قائمة الدورات).
   function exportCoursesStats(data) {
     data = data || {};
-    var courses = Array.isArray(data.courses) ? data.courses : [];
+    // الترتيب: بالاسم.
+    var courses = (Array.isArray(data.courses) ? data.courses : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
+    var statsTotals = (summary.budgetTotal != null || summary.spentTotal != null)
+      ? 'إجمالي الميزانيات: ' + fmtNumber(summary.budgetTotal) + ' ل.س — إجمالي المصروف: ' + fmtNumber(summary.spentTotal) + ' ل.س' : null;
 
-    addTableSheet(wb, 'إحصائيات الدورات', 'إحصائيات الدورات', '',
-      ['الدورة', 'المعرّف', 'المستوى', 'المجموعة', 'المدرب', 'المديرية', 'تاريخ البدء',
+    addTableSheet(wb, 'إحصائيات مجموعات التدريب', 'إحصائيات مجموعات التدريب', '',
+      ['مجموعة التدريب', 'الدورة', 'المعرّف', 'المستوى', 'المجموعة', 'المدرب', 'المديرية', 'تاريخ البدء',
        'إجمالي الجلسات', 'المكتملة', 'المتبقية', 'نسبة الإنجاز %', 'عدد المتدربين',
        'نسبة الحضور %', 'الميزانية المعتمدة', 'المصروف', 'المتبقي'],
       courses.map(function (c) {
@@ -880,6 +1049,7 @@
         var budgetRemaining = c.budgetRemaining != null ? asNumber(c.budgetRemaining)
           : ((budget != null && spent != null) ? budget - spent : '');
         return [
+          asText(c.displayName || c.name),
           asText(c.name),
           asText(c.code),
           asText(c.level),
@@ -897,10 +1067,10 @@
           spent != null ? spent : '',
           budgetRemaining
         ];
-      }));
+      }), statsTotals ? { totals: statsTotals } : null);
 
     addTableSheet(wb, 'ملخص عام', 'ملخص عام', '', ['البند', 'القيمة'], [
-      ['عدد الدورات', summary.courses != null ? asNumber(summary.courses) : ''],
+      ['عدد مجموعات التدريب', summary.courses != null ? asNumber(summary.courses) : ''],
       ['مكتملة', summary.completed != null ? asNumber(summary.completed) : ''],
       ['جارية', summary.inProgress != null ? asNumber(summary.inProgress) : ''],
       ['ملغاة', summary.cancelled != null ? asNumber(summary.cancelled) : ''],
@@ -926,7 +1096,10 @@
     var wb = newWorkbook();
     var added = 0;
 
-    var trainers = Array.isArray(opts.trainers) ? opts.trainers : [];
+    // الترتيب: كل قائمة بالاسم.
+    var trainers = (Array.isArray(opts.trainers) ? opts.trainers : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     if (trainers.length) {
       addTableSheet(wb, 'المدربون', 'المدربون', '', ['الاسم', 'التخصص', 'رقم الهاتف', 'الملاحظة'],
         trainers.map(function (t) {
@@ -935,7 +1108,9 @@
       added++;
     }
 
-    var halls = Array.isArray(opts.halls) ? opts.halls : [];
+    var halls = (Array.isArray(opts.halls) ? opts.halls : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     if (halls.length) {
       addTableSheet(wb, 'القاعات', 'القاعات', '', ['اسم القاعة', 'السعة', 'الموقع', 'الملاحظة'],
         halls.map(function (h) {
@@ -944,7 +1119,11 @@
       added++;
     }
 
-    var directorates = Array.isArray(opts.directorates) ? opts.directorates : [];
+    var directorates = (Array.isArray(opts.directorates) ? opts.directorates : []).slice().sort(function (a, b) {
+      var na = typeof a === 'string' ? a : (a || {}).name;
+      var nb = typeof b === 'string' ? b : (b || {}).name;
+      return cmpText(na, nb);
+    });
     if (directorates.length) {
       addTableSheet(wb, 'المديريات', 'المديريات', '', ['اسم المديرية', 'الملاحظة'],
         directorates.map(function (d) {
@@ -954,13 +1133,17 @@
       added++;
     }
 
-    var groups = Array.isArray(opts.groups) ? opts.groups : [];
+    var groups = (Array.isArray(opts.groups) ? opts.groups : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     if (groups.length) {
       addTableSheet(wb, 'المجموعات التدريبية', 'المجموعات التدريبية', '', GROUP_HEADERS, groupRows(groups));
       added++;
     }
 
-    var trainees = Array.isArray(opts.trainees) ? opts.trainees : [];
+    var trainees = (Array.isArray(opts.trainees) ? opts.trainees : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     if (trainees.length) {
       addTableSheet(wb, 'المتدربون', 'المتدربون', '',
         ['الاسم', 'المديرية', 'رقم الهاتف', 'الملاحظات'],
@@ -971,8 +1154,9 @@
     }
 
     if (added === 0) {
-      var ws = createSheet(wb, 'الدليل', 'الدليل', '', 1);
-      writeDataRow(ws, 3, ['لا توجد بيانات في الدليل']);
+      var ws = createSheet(wb, 'الدليل', 'الدليل', '', 1,
+        buildDetailsText(null, null, 0, null));
+      writeDataRow(ws, HEADER_ROW, ['لا توجد بيانات في الدليل']);
       finishSheet(ws, 1);
     }
 
@@ -985,14 +1169,20 @@
     opts = opts || {};
     activeFmt = resolveFmt(opts);
     var wb = newWorkbook();
-    addBudgetSheet(wb, 'ملخص الميزانية', 'ملخص الميزانية', asText(opts.courseName),
+    addBudgetSheet(wb, 'ملخص الميزانية', 'ملخص الميزانية', asText(opts.displayName || opts.courseName),
       opts, opts.trainerContract, null);
-    var expenses = Array.isArray(opts.expenses) ? opts.expenses : [];
-    addTableSheet(wb, 'تفاصيل المصاريف', 'تفاصيل المصاريف', asText(opts.courseName),
+    // الترتيب: بالتاريخ.
+    var expenses = (Array.isArray(opts.expenses) ? opts.expenses : []).slice().sort(function (a, b) {
+      return cmpDateVal((a || {}).date, (b || {}).date);
+    });
+    var expensesTotal = 0;
+    expenses.forEach(function (e) { expensesTotal += asNumber(e.amount); });
+    addTableSheet(wb, 'تفاصيل المصاريف', 'تفاصيل المصاريف', asText(opts.displayName || opts.courseName),
       ['التاريخ', 'الفئة', 'البيان', 'التفاصيل', 'المبلغ (ل.س)'],
       expenses.map(function (e) {
         return [asDateText(e.date), asText(e.category), asText(e.description), asText(e.details), asNumber(e.amount)];
-      }));
+      }),
+      { totals: 'إجمالي المصروف: ' + fmtNumber(expensesTotal) + ' ل.س' });
     var filename = 'tadreeb-budget-' + sanitizeFilename(opts.courseName) + '-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
   }
@@ -1013,20 +1203,22 @@
       if (s.state === 'منجزة' || s.state === 'done') doneSessions++;
       else if (s.state === 'ملغاة' || s.state === 'cancelled') cancelledSessions++;
     });
-    var presentCount = 0, absentCount = 0, excusedCount = 0;
+    var presentCount = 0, absentCount = 0, excusedCount = 0, cancelledCount = 0;
     attendance.forEach(function (a) {
-      if (a.status === 'موجود') presentCount++;
-      else if (a.status === 'غائب') absentCount++;
-      else if (a.status === 'معتذر') excusedCount++;
+      var st = attStatusLabel(a.status);
+      if (st === 'موجود') presentCount++;
+      else if (st === 'غائب' || st === 'لم يحضر') absentCount++;
+      else if (st === 'معتذر') excusedCount++;
+      else if (st === 'ملغي') cancelledCount++;
     });
     // لا عدّ للناجحين من حالة المتدرب بعد الآن (بند 9 — الحالة موجودة
     // فقط في تفقد الجلسة)؛ عدد المتدربين الإجمالي في الصف أدناه يكفي.
+    // v2.3: «ملغي» مُبطل يُستثنى من مقام نسبة الحضور.
     var totalAttendance = presentCount + absentCount + excusedCount;
     var attendanceRate = totalAttendance ? Math.round((presentCount / totalAttendance) * 100) : 0;
 
-    var ws = createSheet(wb, 'ملخص ختامي', 'الملخص الختامي', asText(info.name), 2);
-    writeHeaderRow(ws, 3, ['البند', 'القيمة']);
     var rows = [
+      ['مجموعة التدريب', asText(info.displayName || info.name)],
       ['اسم الدورة', asText(info.name)],
       ['المدرب', asText(info.trainer)],
       ['الحالة', asText(info.status)],
@@ -1038,10 +1230,15 @@
       ['موجود', presentCount],
       ['غائب', absentCount],
       ['معتذر', excusedCount],
+      ['ملغي', cancelledCount],
       ['نسبة الحضور %', attendanceRate]
     ];
-    rows.forEach(function (row, i) { writeDataRow(ws, 4 + i, row); });
-    var next = 4 + rows.length + 1;
+    var ws = createSheet(wb, 'ملخص ختامي', 'الملخص الختامي', asText(info.displayName || info.name), 2,
+      buildDetailsText('مجموعة التدريب: ' + asText(info.displayName || info.name), null, rows.length,
+        'عدد الجلسات: ' + fmtNumber(schedule.length) + ' — عدد المتدربين: ' + fmtNumber(trainees.length)));
+    writeHeaderRow(ws, HEADER_ROW, ['البند', 'القيمة']);
+    rows.forEach(function (row, i) { writeDataRow(ws, DATA_ROW + i, row); });
+    var next = DATA_ROW + rows.length + 1;
     writeHeaderRow(ws, next, ['النتيجة الكاملة للميزانية', 'المبلغ (ل.س)']);
     writeDataRow(ws, next + 1, ['الميزانية المخصصة', asNumber(budget.allocated)]);
     writeDataRow(ws, next + 2, ['إجمالي المصاريف', asNumber(budget.totalSpent)]);
@@ -1063,8 +1260,8 @@
     var remaining = (totals.totalBudget != null && totals.totalSpent != null)
       ? asNumber(totals.totalBudget) - asNumber(totals.totalSpent) : '';
     addTableSheet(wb, 'ملخص عام', 'ملخص عام', '', ['المؤشر', 'القيمة'], [
-      ['عدد الدورات', totals.courses != null ? asNumber(totals.courses) : ''],
-      ['الدورات النشطة', totals.activeCourses != null ? asNumber(totals.activeCourses) : ''],
+      ['عدد مجموعات التدريب', totals.courses != null ? asNumber(totals.courses) : ''],
+      ['مجموعات التدريب النشطة', totals.activeCourses != null ? asNumber(totals.activeCourses) : ''],
       ['عدد المتدربين', totals.trainees != null ? asNumber(totals.trainees) : ''],
       ['عدد المدربين', totals.trainers != null ? asNumber(totals.trainers) : ''],
       ['عدد القاعات', totals.halls != null ? asNumber(totals.halls) : ''],
@@ -1077,15 +1274,23 @@
       ['المتبقي (ل.س)', remaining]
     ]);
 
-    // الدورات: صف لكل دورة
-    var courses = Array.isArray(data.courses) ? data.courses : [];
-    addTableSheet(wb, 'الدورات', 'الدورات', '',
-      ['اسم الدورة', 'المدرب', 'نسبة التقدم %', 'المنجزة', 'إجمالي الجلسات',
+    // مجموعات التدريب: صف لكل مجموعة — مرتبة حسب اسم الدورة.
+    var courses = (Array.isArray(data.courses) ? data.courses : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
+    var sumBudget = 0, sumSpent = 0, sumHasMoney = false;
+    courses.forEach(function (c) {
+      if (c.budget != null) { sumBudget += asNumber(c.budget); sumHasMoney = true; }
+      if (c.spent != null) { sumSpent += asNumber(c.spent); sumHasMoney = true; }
+    });
+    addTableSheet(wb, 'مجموعات التدريب', 'مجموعات التدريب', '',
+      ['مجموعة التدريب', 'الدورة', 'المدرب', 'نسبة التقدم %', 'المنجزة', 'إجمالي الجلسات',
        'الميزانية (ل.س)', 'المصروف (ل.س)', 'المتبقي (ل.س)', 'الحالة'],
       courses.map(function (c) {
         var rem = c.remaining != null ? asNumber(c.remaining)
           : (c.budget != null && c.spent != null ? asNumber(c.budget) - asNumber(c.spent) : '');
         return [
+          asText(c.displayName || c.name),
           asText(c.name),
           asText(c.trainer),
           c.progress != null ? asNumber(c.progress) : '',
@@ -1096,20 +1301,23 @@
           rem,
           asText(c.status)
         ];
-      }));
+      }), sumHasMoney ? { totals: 'إجمالي الميزانيات: ' + fmtNumber(sumBudget) + ' ل.س — إجمالي المصروف: ' + fmtNumber(sumSpent) + ' ل.س' } : null);
 
     // الحضور: أعداد الأسبوع
     var aw = data.attendanceWeek || {};
     var total = aw.total != null ? asNumber(aw.total)
       : asNumber(aw.present) + asNumber(aw.absent) + asNumber(aw.excused);
     var rate = total ? Math.round((asNumber(aw.present) / total) * 100) : '';
-    addTableSheet(wb, 'الحضور', 'الحضور الأسبوعي', '', ['الحالة', 'العدد'], [
+    var attWeekRows = [
       ['موجود', asNumber(aw.present)],
       ['غائب', asNumber(aw.absent)],
-      ['معتذر', asNumber(aw.excused)],
-      ['الإجمالي', total],
-      ['نسبة الحضور %', rate]
-    ]);
+      ['معتذر', asNumber(aw.excused)]
+    ];
+    // v2.3: «ملغي» يُعرض صفاً خاصاً متى وُجد (مُبطل — خارج المقام).
+    if (aw.cancelled != null) attWeekRows.push(['ملغي', asNumber(aw.cancelled)]);
+    attWeekRows.push(['الإجمالي', total]);
+    attWeekRows.push(['نسبة الحضور %', rate]);
+    addTableSheet(wb, 'الحضور', 'الحضور الأسبوعي', '', ['الحالة', 'العدد'], attWeekRows);
 
     var filename = 'tadreeb-summary-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
@@ -1122,18 +1330,21 @@
     var wb = newWorkbook();
     var added = 0;
 
-    function maybeAdd(name, title, headers, rows) {
+    function maybeAdd(name, title, headers, rows, extra) {
       if (!rows.length) return;
-      addTableSheet(wb, name, title, '', headers, rows);
+      addTableSheet(wb, name, title, '', headers, rows, extra);
       added++;
     }
 
-    var courses = Array.isArray(data.courses) ? data.courses : [];
-    maybeAdd('الدورات', 'الدورات',
-      ['الاسم', 'المدرب', 'الأيام', 'الفترة', 'عدد الجلسات', 'الحالة', 'الميزانية (ل.س)', 'الملاحظات'],
+    // الترتيب: مجموعات التدريب حسب اسم الدورة.
+    var courses = (Array.isArray(data.courses) ? data.courses : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
+    maybeAdd('مجموعات التدريب', 'مجموعات التدريب',
+      ['مجموعة التدريب', 'الدورة', 'المدرب', 'الأيام', 'الفترة', 'عدد الجلسات', 'الحالة', 'الميزانية (ل.س)', 'الملاحظات'],
       courses.map(function (c) {
         return [
-          asText(c.name), asText(c.trainer), asText(c.days), asText(c.period),
+          asText(c.displayName || c.name), asText(c.name), asText(c.trainer), asText(c.days), asText(c.period),
           c.sessionCount != null ? asNumber(c.sessionCount) : (c.sessions != null ? asNumber(c.sessions) : ''),
           asText(c.status),
           c.budget != null ? asNumber(c.budget) : '',
@@ -1141,9 +1352,15 @@
         ];
       }));
 
-    var sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    // الترتيب: الجلسات بالتاريخ ثم الفترة ثم مجموعة التدريب.
+    var sessions = (Array.isArray(data.sessions) ? data.sessions : []).slice().sort(function (a, b) {
+      var d = cmpDateVal((a || {}).date, (b || {}).date);
+      if (d !== 0) return d;
+      var p = cmpText((a || {}).period, (b || {}).period);
+      return p !== 0 ? p : cmpText((a || {}).course || (a || {}).courseName, (b || {}).course || (b || {}).courseName);
+    });
     maybeAdd('الجلسات', 'الجلسات',
-      ['الدورة', 'التاريخ', 'اليوم', 'الفترة', 'القاعة', 'المدرب', 'الحالة', 'الملاحظة'],
+      ['مجموعة التدريب', 'التاريخ', 'اليوم', 'الفترة', 'القاعة', 'المدرب', 'الحالة', 'الملاحظة'],
       sessions.map(function (s) {
         return [
           asText(s.course || s.courseName), asDateText(s.date), asText(s.day), asText(s.period),
@@ -1151,9 +1368,12 @@
         ];
       }));
 
-    var trainees = Array.isArray(data.trainees) ? data.trainees : [];
+    // الترتيب: المتدربون بالاسم.
+    var trainees = (Array.isArray(data.trainees) ? data.trainees : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     maybeAdd('المتدربون', 'المتدربون',
-      ['الاسم', 'المديرية', 'رقم الهاتف', 'الدورة', 'الملاحظات'],
+      ['الاسم', 'المديرية', 'رقم الهاتف', 'مجموعة التدريب', 'الملاحظات'],
       trainees.map(function (t) {
         return [
           asText(t.name), asText(t.directorate), asText(t.phone), asText(t.course || t.courseName),
@@ -1161,14 +1381,20 @@
         ];
       }));
 
-    var trainers = Array.isArray(data.trainers) ? data.trainers : [];
+    var trainers = (Array.isArray(data.trainers) ? data.trainers : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     maybeAdd('المدربون', 'المدربون',
       ['الاسم', 'التخصص', 'رقم الهاتف', 'الملاحظة'],
       trainers.map(function (t) {
         return [asText(t.name), asText(t.specialty), asText(t.phone), asText(t.note)];
       }));
 
-    var directorates = Array.isArray(data.directorates) ? data.directorates : [];
+    var directorates = (Array.isArray(data.directorates) ? data.directorates : []).slice().sort(function (a, b) {
+      var na = typeof a === 'string' ? a : (a || {}).name;
+      var nb = typeof b === 'string' ? b : (b || {}).name;
+      return cmpText(na, nb);
+    });
     maybeAdd('المديريات', 'المديريات',
       ['اسم المديرية', 'الملاحظة'],
       directorates.map(function (d) {
@@ -1176,53 +1402,81 @@
         return [asText(d.name), asText(d.note)];
       }));
 
-    var groups = Array.isArray(data.groups) ? data.groups : [];
+    var groups = (Array.isArray(data.groups) ? data.groups : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     maybeAdd('المجموعات التدريبية', 'المجموعات التدريبية', GROUP_HEADERS, groupRows(groups));
 
-    var halls = Array.isArray(data.halls) ? data.halls : [];
+    var halls = (Array.isArray(data.halls) ? data.halls : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     maybeAdd('القاعات', 'القاعات',
       ['اسم القاعة', 'السعة', 'الموقع', 'الملاحظة'],
       halls.map(function (h) {
         return [asText(h.name), h.capacity != null ? asNumber(h.capacity) : '', asText(h.location), asText(h.note)];
       }));
 
-    var periods = Array.isArray(data.periods) ? data.periods : [];
+    // الترتيب: الفترات بوقت البدء.
+    var periods = (Array.isArray(data.periods) ? data.periods : []).slice().sort(function (a, b) {
+      var t = cmpTimeText((a || {}).time, (b || {}).time);
+      return t !== 0 ? t : cmpText((a || {}).label || (a || {}).name, (b || {}).label || (b || {}).name);
+    });
     maybeAdd('الفترات', 'الفترات التدريبية',
       ['اسم الفترة', 'الوقت', 'الملاحظة'],
       periods.map(function (p) {
         return [asText(p.label || p.name), asText(p.time), asText(p.note)];
       }));
 
-    var holidays = Array.isArray(data.holidays) ? data.holidays : [];
+    // الترتيب: العطل بالتاريخ.
+    var holidays = (Array.isArray(data.holidays) ? data.holidays : []).slice().sort(function (a, b) {
+      return cmpDateVal((a || {}).date, (b || {}).date);
+    });
     maybeAdd('العطل', 'أيام العطل',
       ['التاريخ', 'المناسبة', 'الملاحظة'],
       holidays.map(function (h) {
         return [asDateText(h.date), asText(h.name || h.label || h.reason), asText(h.note)];
       }));
 
-    var expenses = Array.isArray(data.expenses) ? data.expenses : [];
+    // الترتيب: المصاريف بالتاريخ.
+    var expenses = (Array.isArray(data.expenses) ? data.expenses : []).slice().sort(function (a, b) {
+      return cmpDateVal((a || {}).date, (b || {}).date);
+    });
+    var backupExpensesTotal = 0;
+    expenses.forEach(function (e) { backupExpensesTotal += asNumber(e.amount); });
     maybeAdd('المصاريف', 'المصاريف',
-      ['التاريخ', 'الدورة', 'الفئة', 'البيان', 'التفاصيل', 'المبلغ (ل.س)'],
+      ['التاريخ', 'مجموعة التدريب', 'الفئة', 'البيان', 'التفاصيل', 'المبلغ (ل.س)'],
       expenses.map(function (e) {
         return [
           asDateText(e.date), asText(e.course || e.courseName), asText(e.category),
           asText(e.description), asText(e.details), asNumber(e.amount)
         ];
-      }));
+      }),
+      { totals: 'إجمالي المصروف: ' + fmtNumber(backupExpensesTotal) + ' ل.س' });
 
     // المستخدمون: اسم المستخدم والدور فقط — أبداً كلمات المرور
-    var users = Array.isArray(data.users) ? data.users : [];
+    // الترتيب: المستخدمون باسم المستخدم.
+    var users = (Array.isArray(data.users) ? data.users : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).username, (b || {}).username);
+    });
     maybeAdd('المستخدمون', 'المستخدمون',
       ['اسم المستخدم', 'الدور'],
       users.map(function (u) {
         return [asText(u.username), asText(u.role)];
       }));
 
-    // سجل التدقيق: فقط إذا وُفّر
+    // سجل التدقيق: فقط إذا وُفّر — الأحدث أولاً (سجل نشاط).
     if (Array.isArray(data.audit)) {
+      var auditRows = data.audit.slice().sort(function (a, b) {
+        var ta = (a || {}).timestamp || (a || {}).date || (a || {}).time || '';
+        var tb = (b || {}).timestamp || (b || {}).date || (b || {}).time || '';
+        var ma = ta instanceof Date ? ta.getTime() : Date.parse(String(ta));
+        var mb = tb instanceof Date ? tb.getTime() : Date.parse(String(tb));
+        if (!isNaN(ma) && !isNaN(mb)) return mb - ma;
+        return String(tb) < String(ta) ? -1 : String(tb) > String(ta) ? 1 : 0;
+      });
       addTableSheet(wb, 'سجل التدقيق', 'سجل التدقيق', '',
         ['التاريخ والوقت', 'المستخدم', 'الإجراء', 'التفاصيل'],
-        data.audit.map(function (a) {
+        auditRows.map(function (a) {
           return [
             asDateTimeText(a.timestamp || a.date || a.time),
             asText(a.user || a.username),
@@ -1234,8 +1488,9 @@
     }
 
     if (added === 0) {
-      var ws = createSheet(wb, 'النسخة الاحتياطية', 'النسخة الاحتياطية', '', 1);
-      writeDataRow(ws, 3, ['لا توجد بيانات للنسخ الاحتياطي']);
+      var ws = createSheet(wb, 'النسخة الاحتياطية', 'النسخة الاحتياطية', '', 1,
+        buildDetailsText(null, null, 0, null));
+      writeDataRow(ws, HEADER_ROW, ['لا توجد بيانات للنسخ الاحتياطي']);
       finishSheet(ws, 1);
     }
 
@@ -1256,21 +1511,21 @@
   }
 
   // ورقة جدول إحصاءات من تعريفات أعمدة + صفوف بيانات خام.
-  function addStatsSheet(wb, name, title, subtitle, columns, rows, options) {
+  function addStatsSheet(wb, name, title, subtitle, columns, rows, options, extra) {
     var cols = visibleColumns(columns, options);
     var headers = cols.map(function (c) { return c.label; });
     var dataRows = (Array.isArray(rows) ? rows : []).map(function (r) {
       return cols.map(function (c) { return c.get(r); });
     });
-    return addTableSheet(wb, name, title, subtitle, headers, dataRows);
+    return addTableSheet(wb, name, title, subtitle, headers, dataRows, extra);
   }
 
   // ورقة «ملخص عام» من أزواج [البند، القيمة] (الأرقام خلايا رقمية حقيقية).
-  function addSummarySheet(wb, title, subtitle, pairs) {
+  function addSummarySheet(wb, title, subtitle, pairs, extra) {
     return addTableSheet(wb, 'ملخص عام', title, subtitle, ['البند', 'القيمة'],
       (Array.isArray(pairs) ? pairs : []).map(function (p) {
         return [asText(p[0]), p[1] == null ? '' : p[1]];
-      }));
+      }), extra);
   }
 
   // سطر نطاق زمني للعنوان الفرعي («النطاق: 2026-11-01 — 2026-11-30»).
@@ -1302,7 +1557,10 @@
   function exportHallsStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var halls = Array.isArray(data.halls) ? data.halls : [];
+    // الترتيب: بالاسم.
+    var halls = (Array.isArray(data.halls) ? data.halls : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     var columns = [
@@ -1333,8 +1591,15 @@
     activeFmt = resolveFmt(data);
     var hall = data.hall || {};
     var stats = data.stats || {};
-    var sessions = Array.isArray(data.sessions) ? data.sessions : [];
-    var meetings = Array.isArray(data.meetings) ? data.meetings : [];
+    // الترتيب: الجلسات والاجتماعات بالتاريخ ثم الفترة.
+    var sessions = (Array.isArray(data.sessions) ? data.sessions : []).slice().sort(function (a, b) {
+      var d = cmpDateVal((a || {}).date, (b || {}).date);
+      return d !== 0 ? d : cmpText((a || {}).period, (b || {}).period);
+    });
+    var meetings = (Array.isArray(data.meetings) ? data.meetings : []).slice().sort(function (a, b) {
+      var d = cmpDateVal((a || {}).date, (b || {}).date);
+      return d !== 0 ? d : cmpText((a || {}).period, (b || {}).period);
+    });
     var wb = newWorkbook();
     addTableSheet(wb, 'إحصاءات القاعة', 'إحصاءات القاعة', asText(hall.name),
       ['البند', 'القيمة'], [
@@ -1344,7 +1609,7 @@
         ['عدد الجلسات', stats.sessions != null ? asNumber(stats.sessions) : ''],
         ['عدد الاجتماعات', stats.meetings != null ? asNumber(stats.meetings) : ''],
         ['نسبة الإشغال %', stats.occupancy != null ? asNumber(stats.occupancy) : ''],
-        ['عدد الدورات', stats.courses != null ? asNumber(stats.courses) : ''],
+        ['عدد مجموعات التدريب', stats.courses != null ? asNumber(stats.courses) : ''],
         ['النطاق', rangeSubtitle(data.from, data.to)]
       ]);
     addStatsSheet(wb, 'الجلسات', 'جلسات القاعة', asText(hall.name), [
@@ -1374,22 +1639,26 @@
   function exportTrainersStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var trainers = Array.isArray(data.trainers) ? data.trainers : [];
+    // الترتيب: بالاسم.
+    var trainers = (Array.isArray(data.trainers) ? data.trainers : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     addStatsSheet(wb, 'إحصاءات المدربين', 'إحصاءات المدربين', '', [
       { id: 'name', label: 'المدرب', get: function (r) { return asText(r.name); } },
       { id: 'code', label: 'المعرّف', get: function (r) { return asText(r.code); } },
       { id: 'specialty', label: 'التخصص', get: function (r) { return asText(r.specialty); } },
-      { id: 'courses', label: 'عدد الدورات', get: function (r) { return asNumber(r.courses); } },
+      { id: 'courses', label: 'عدد مجموعات التدريب', get: function (r) { return asNumber(r.courses); } },
       { id: 'sessions', label: 'عدد الجلسات', get: function (r) { return asNumber(r.sessions); } },
       { id: 'hours', label: 'إجمالي الساعات', get: function (r) { return r.hours != null ? asNumber(r.hours) : ''; } },
       { id: 'feeDue', label: 'الأجور المستحقة (ل.س)', get: function (r) { return r.feeDue != null ? asNumber(r.feeDue) : ''; } }
-    ], trainers, options);
+    ], trainers, options,
+      summary.totalFeesDue != null ? { totals: 'إجمالي الأجور المستحقة: ' + fmtNumber(summary.totalFeesDue) + ' ل.س' } : null);
     addSummarySheet(wb, 'ملخص المدربين', '', [
       ['عدد المدربين', summary.trainers != null ? asNumber(summary.trainers) : ''],
-      ['مدربون لهم دورات', summary.withCourses != null ? asNumber(summary.withCourses) : ''],
-      ['مدربون بلا دورات', summary.withoutCourses != null ? asNumber(summary.withoutCourses) : ''],
+      ['مدربون لهم مجموعات تدريب', summary.withCourses != null ? asNumber(summary.withCourses) : ''],
+      ['مدربون بلا مجموعات تدريب', summary.withoutCourses != null ? asNumber(summary.withoutCourses) : ''],
       ['إجمالي الجلسات', summary.totalSessions != null ? asNumber(summary.totalSessions) : ''],
       ['إجمالي الساعات', summary.totalHours != null ? asNumber(summary.totalHours) : ''],
       ['إجمالي الأجور المستحقة (ل.س)', summary.totalFeesDue != null ? asNumber(summary.totalFeesDue) : '']
@@ -1404,7 +1673,10 @@
   function exportGroupsStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var groups = Array.isArray(data.groups) ? data.groups : [];
+    // الترتيب: بالاسم.
+    var groups = (Array.isArray(data.groups) ? data.groups : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     addStatsSheet(wb, 'إحصاءات المجموعات', 'إحصاءات المجموعات التدريبية', '', [
@@ -1412,15 +1684,15 @@
       { id: 'code', label: 'المعرّف', get: function (r) { return asText(r.code); } },
       { id: 'directorate', label: 'المديرية', get: function (r) { return asText(r.directorate); } },
       { id: 'members', label: 'عدد الأعضاء', get: function (r) { return asNumber(r.members); } },
-      { id: 'courses', label: 'عدد الدورات', get: function (r) { return asNumber(r.courses); } },
+      { id: 'courses', label: 'عدد مجموعات التدريب', get: function (r) { return asNumber(r.courses); } },
       { id: 'sessions', label: 'عدد الجلسات', get: function (r) { return asNumber(r.sessions); } }
     ], groups, options);
     addSummarySheet(wb, 'ملخص المجموعات', '', [
       ['عدد المجموعات', summary.groups != null ? asNumber(summary.groups) : ''],
       ['إجمالي الأعضاء', summary.members != null ? asNumber(summary.members) : ''],
-      ['إجمالي الدورات', summary.courses != null ? asNumber(summary.courses) : ''],
+      ['إجمالي مجموعات التدريب', summary.courses != null ? asNumber(summary.courses) : ''],
       ['مجموعات بلا أعضاء', summary.emptyGroups != null ? asNumber(summary.emptyGroups) : ''],
-      ['مجموعات بلا دورات', summary.groupsWithoutCourses != null ? asNumber(summary.groupsWithoutCourses) : '']
+      ['مجموعات غير معيّنة', summary.groupsWithoutCourses != null ? asNumber(summary.groupsWithoutCourses) : '']
     ]);
     var filename = 'tadreeb-groups-stats-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
@@ -1432,7 +1704,10 @@
   function exportDirectoratesStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var directorates = Array.isArray(data.directorates) ? data.directorates : [];
+    // الترتيب: بالاسم.
+    var directorates = (Array.isArray(data.directorates) ? data.directorates : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     addStatsSheet(wb, 'إحصاءات المديريات', 'إحصاءات المديريات', '', [
@@ -1440,14 +1715,14 @@
       { id: 'code', label: 'المعرّف', get: function (r) { return asText(r.code); } },
       { id: 'trainees', label: 'عدد المتدربين', get: function (r) { return asNumber(r.trainees); } },
       { id: 'groups', label: 'عدد المجموعات', get: function (r) { return asNumber(r.groups); } },
-      { id: 'courses', label: 'عدد الدورات', get: function (r) { return asNumber(r.courses); } },
+      { id: 'courses', label: 'عدد مجموعات التدريب', get: function (r) { return asNumber(r.courses); } },
       { id: 'sessions', label: 'عدد الجلسات', get: function (r) { return asNumber(r.sessions); } }
     ], directorates, options);
     addSummarySheet(wb, 'ملخص المديريات', '', [
       ['عدد المديريات', summary.directorates != null ? asNumber(summary.directorates) : ''],
       ['إجمالي المتدربين', summary.trainees != null ? asNumber(summary.trainees) : ''],
       ['إجمالي المجموعات', summary.groups != null ? asNumber(summary.groups) : ''],
-      ['إجمالي الدورات', summary.courses != null ? asNumber(summary.courses) : ''],
+      ['إجمالي مجموعات التدريب', summary.courses != null ? asNumber(summary.courses) : ''],
       ['المديرية الأكثر متدربين', asText(summary.topDirectorate)]
     ]);
     var filename = 'tadreeb-directorates-stats-' + todayString() + '.xlsx';
@@ -1460,7 +1735,11 @@
   function exportPeriodsStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var periods = Array.isArray(data.periods) ? data.periods : [];
+    // الترتيب: بوقت البدء.
+    var periods = (Array.isArray(data.periods) ? data.periods : []).slice().sort(function (a, b) {
+      var t = cmpTimeText((a || {}).time, (b || {}).time);
+      return t !== 0 ? t : cmpText((a || {}).label, (b || {}).label);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     addStatsSheet(wb, 'إحصاءات الفترات', 'إحصاءات الفترات التدريبية', '', [
@@ -1487,20 +1766,23 @@
   function exportLevelsStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var levels = Array.isArray(data.levels) ? data.levels : [];
+    // الترتيب: بالاسم.
+    var levels = (Array.isArray(data.levels) ? data.levels : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).level, (b || {}).level);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
-    addStatsSheet(wb, 'إحصاءات المستويات', 'إحصاءات مستويات الدورات', '', [
+    addStatsSheet(wb, 'إحصاءات المستويات', 'إحصاءات مستويات مجموعات التدريب', '', [
       { id: 'level', label: 'المستوى', get: function (r) { return asText(r.level); } },
-      { id: 'courses', label: 'عدد الدورات', get: function (r) { return asNumber(r.courses); } },
+      { id: 'courses', label: 'عدد مجموعات التدريب', get: function (r) { return asNumber(r.courses); } },
       { id: 'sessions', label: 'عدد الجلسات', get: function (r) { return asNumber(r.sessions); } },
       { id: 'trainees', label: 'عدد المتدربين', get: function (r) { return asNumber(r.trainees); } }
     ], levels, options);
     addSummarySheet(wb, 'ملخص المستويات', '', [
       ['عدد المستويات', summary.levels != null ? asNumber(summary.levels) : ''],
-      ['إجمالي الدورات', summary.courses != null ? asNumber(summary.courses) : ''],
-      ['دورات بلا مستوى', summary.withoutLevel != null ? asNumber(summary.withoutLevel) : ''],
-      ['المستوى الأكثر دورات', asText(summary.topLevel)]
+      ['إجمالي مجموعات التدريب', summary.courses != null ? asNumber(summary.courses) : ''],
+      ['مجموعات تدريب بلا مستوى', summary.withoutLevel != null ? asNumber(summary.withoutLevel) : ''],
+      ['المستوى الأكثر مجموعات تدريب', asText(summary.topLevel)]
     ]);
     var filename = 'tadreeb-levels-stats-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
@@ -1512,7 +1794,11 @@
   function exportMeetings(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var meetings = Array.isArray(data.meetings) ? data.meetings : [];
+    // الترتيب: بالتاريخ ثم الفترة.
+    var meetings = (Array.isArray(data.meetings) ? data.meetings : []).slice().sort(function (a, b) {
+      var d = cmpDateVal((a || {}).date, (b || {}).date);
+      return d !== 0 ? d : cmpText((a || {}).period, (b || {}).period);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     var columns = visibleColumns([
@@ -1525,13 +1811,14 @@
       { id: 'note', label: 'الملاحظة', get: function (r) { return asText(r.note); } }
     ], options);
     var ws = createSheet(wb, 'الاجتماعات العارضة', 'الاجتماعات العارضة',
-      rangeSubtitle(data.from, data.to), columns.length);
-    writeHeaderRow(ws, 3, columns.map(function (c) { return c.label; }));
+      rangeSubtitle(data.from, data.to), columns.length,
+      buildDetailsText(rangeSubtitle(data.from, data.to), null, meetings.length, null));
+    writeHeaderRow(ws, HEADER_ROW, columns.map(function (c) { return c.label; }));
     meetings.forEach(function (m, i) {
-      writeDataRow(ws, 4 + i, columns.map(function (c) { return c.get(m); }));
+      writeDataRow(ws, DATA_ROW + i, columns.map(function (c) { return c.get(m); }));
     });
     // كتلة الملخص أسفل الجدول (كما في تصدير الحضور).
-    var next = 4 + meetings.length + 1;
+    var next = DATA_ROW + meetings.length + 1;
     writeHeaderRow(ws, next, ['الملخص', 'العدد']);
     writeDataRow(ws, next + 1, ['إجمالي الاجتماعات', meetings.length]);
     writeDataRow(ws, next + 2, ['مجدولة', summary.scheduled != null ? asNumber(summary.scheduled) : '']);
@@ -1550,7 +1837,10 @@
   function exportUsersStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var users = Array.isArray(data.users) ? data.users : [];
+    // الترتيب: باسم المستخدم.
+    var users = (Array.isArray(data.users) ? data.users : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).username, (b || {}).username);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     addStatsSheet(wb, 'المستخدمون', 'المستخدمون', '', [
@@ -1575,27 +1865,35 @@
   function exportExpensesStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var byCategory = Array.isArray(data.byCategory) ? data.byCategory : [];
-    var byCourse = Array.isArray(data.byCourse) ? data.byCourse : [];
+    // الترتيب: بالإجمالي تنازلياً (الأعلى صرفاً أولاً).
+    var byCategory = (Array.isArray(data.byCategory) ? data.byCategory : []).slice().sort(function (a, b) {
+      return asNumber((b || {}).total) - asNumber((a || {}).total);
+    });
+    var byCourse = (Array.isArray(data.byCourse) ? data.byCourse : []).slice().sort(function (a, b) {
+      return asNumber((b || {}).total) - asNumber((a || {}).total);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
+    var catTotal = 0, courseTotal = 0;
+    byCategory.forEach(function (r) { catTotal += asNumber(r.total); });
+    byCourse.forEach(function (r) { courseTotal += asNumber(r.total); });
     addStatsSheet(wb, 'المصاريف حسب الفئة', 'المصاريف حسب الفئة', '', [
       { id: 'category', label: 'الفئة', get: function (r) { return asText(r.category); } },
       { id: 'count', label: 'عدد المصاريف', get: function (r) { return asNumber(r.count); } },
       { id: 'total', label: 'الإجمالي (ل.س)', get: function (r) { return asNumber(r.total); } }
-    ], byCategory, options);
-    addStatsSheet(wb, 'المصاريف حسب الدورة', 'المصاريف حسب الدورة', '', [
-      { id: 'course', label: 'الدورة', get: function (r) { return asText(r.course); } },
+    ], byCategory, options, { totals: 'إجمالي المصروف: ' + fmtNumber(catTotal) + ' ل.س' });
+    addStatsSheet(wb, 'المصاريف حسب مجموعة التدريب', 'المصاريف حسب مجموعة التدريب', '', [
+      { id: 'course', label: 'مجموعة التدريب', get: function (r) { return asText(r.course); } },
       { id: 'count', label: 'عدد المصاريف', get: function (r) { return asNumber(r.count); } },
       { id: 'total', label: 'الإجمالي (ل.س)', get: function (r) { return asNumber(r.total); } }
-    ], byCourse, options);
+    ], byCourse, options, { totals: 'إجمالي المصروف: ' + fmtNumber(courseTotal) + ' ل.س' });
     addSummarySheet(wb, 'ملخص المصاريف', '', [
       ['إجمالي المصروف (ل.س)', summary.totalSpent != null ? asNumber(summary.totalSpent) : ''],
       ['عدد المصاريف', summary.count != null ? asNumber(summary.count) : ''],
       ['متوسط المصروف (ل.س)', summary.avgExpense != null ? asNumber(summary.avgExpense) : ''],
       ['عدد الفئات المستخدمة', summary.categoriesCount != null ? asNumber(summary.categoriesCount) : ''],
       ['الفئة الأعلى صرفاً', asText(summary.topCategory)],
-      ['الدورة الأعلى صرفاً', asText(summary.topCourse)]
+      ['مجموعة التدريب الأعلى صرفاً', asText(summary.topCourse)]
     ]);
     var filename = 'tadreeb-expenses-stats-' + todayString() + '.xlsx';
     return writeWorkbook(wb, filename);
@@ -1608,7 +1906,10 @@
   function exportAttendanceStats(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var rows = Array.isArray(data.rows) ? data.rows : [];
+    // الترتيب: بالاسم.
+    var rows = (Array.isArray(data.rows) ? data.rows : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
     var summary = data.summary || {};
     var nameLabel = data.nameLabel || 'الاسم';
     var wb = newWorkbook();
@@ -1617,6 +1918,7 @@
       { id: 'present', label: 'موجود', get: function (r) { return asNumber(r.present); } },
       { id: 'absent', label: 'غائب', get: function (r) { return asNumber(r.absent); } },
       { id: 'excused', label: 'معتذر', get: function (r) { return asNumber(r.excused); } },
+      { id: 'cancelled', label: 'ملغي', get: function (r) { return asNumber(r.cancelled); } },
       { id: 'unrecorded', label: 'بلا تسجيل', get: function (r) { return asNumber(r.unrecorded); } },
       { id: 'total', label: 'إجمالي المسجل', get: function (r) { return asNumber(r.total); } },
       { id: 'rate', label: 'نسبة الحضور %', get: function (r) { return r.rate != null ? asNumber(r.rate) : ''; } }
@@ -1625,6 +1927,7 @@
       ['موجود', summary.present != null ? asNumber(summary.present) : ''],
       ['غائب', summary.absent != null ? asNumber(summary.absent) : ''],
       ['معتذر', summary.excused != null ? asNumber(summary.excused) : ''],
+      ['ملغي', summary.cancelled != null ? asNumber(summary.cancelled) : ''],
       ['بلا تسجيل', summary.unrecorded != null ? asNumber(summary.unrecorded) : ''],
       ['إجمالي المسجل', summary.total != null ? asNumber(summary.total) : ''],
       ['نسبة الحضور %', summary.rate != null ? asNumber(summary.rate) : '']
@@ -1643,8 +1946,14 @@
     data = data || {};
     activeFmt = resolveFmt(data);
     var summary = data.summary || {};
-    var byHall = Array.isArray(data.byHall) ? data.byHall : [];
-    var byPeriod = Array.isArray(data.byPeriod) ? data.byPeriod : [];
+    // الترتيب: القاعات بالاسم، الفترات بوقت البدء.
+    var byHall = (Array.isArray(data.byHall) ? data.byHall : []).slice().sort(function (a, b) {
+      return cmpText((a || {}).name, (b || {}).name);
+    });
+    var byPeriod = (Array.isArray(data.byPeriod) ? data.byPeriod : []).slice().sort(function (a, b) {
+      var t = cmpTimeText((a || {}).time, (b || {}).time);
+      return t !== 0 ? t : cmpText((a || {}).label, (b || {}).label);
+    });
     var wb = newWorkbook();
     addTableSheet(wb, 'ملخص النطاق', 'ملخص النطاق', rangeSubtitle(data.from, data.to),
       ['البند', 'القيمة'], [
@@ -1680,7 +1989,10 @@
   function exportHolidays(data, options) {
     data = data || {};
     activeFmt = resolveFmt(data);
-    var holidays = Array.isArray(data.holidays) ? data.holidays : [];
+    // الترتيب: بالتاريخ.
+    var holidays = (Array.isArray(data.holidays) ? data.holidays : []).slice().sort(function (a, b) {
+      return cmpDateVal((a || {}).date, (b || {}).date);
+    });
     var summary = data.summary || {};
     var wb = newWorkbook();
     var columns = visibleColumns([
@@ -1688,13 +2000,14 @@
       { id: 'name', label: 'اسم العطلة', get: function (r) { return asText(r.name); } },
       { id: 'note', label: 'الملاحظة', get: function (r) { return asText(r.note); } }
     ], options);
-    var ws = createSheet(wb, 'العطل', 'العطل', '', columns.length);
-    writeHeaderRow(ws, 3, columns.map(function (c) { return c.label; }));
+    var ws = createSheet(wb, 'العطل', 'العطل', '', columns.length,
+      buildDetailsText(null, null, holidays.length, null));
+    writeHeaderRow(ws, HEADER_ROW, columns.map(function (c) { return c.label; }));
     holidays.forEach(function (h, i) {
-      writeDataRow(ws, 4 + i, columns.map(function (c) { return c.get(h); }));
+      writeDataRow(ws, DATA_ROW + i, columns.map(function (c) { return c.get(h); }));
     });
     // كتلة الملخص أسفل الجدول (كما في تصدير الحضور).
-    var next = 4 + holidays.length + 1;
+    var next = DATA_ROW + holidays.length + 1;
     writeHeaderRow(ws, next, ['الملخص', 'العدد']);
     writeDataRow(ws, next + 1, ['إجمالي العطل', holidays.length]);
     writeDataRow(ws, next + 2, ['قادمة', summary.upcoming != null ? asNumber(summary.upcoming) : '']);
@@ -1924,6 +2237,215 @@
     }
   }
 
+  /* ---------- 14. استيراد المتدربين من إكسل (v2.3 — M) ----------
+   * العمود A = الاسم، العمود B = رقم الهاتف. الصف الأول يُتخطى إن
+   * كان ترويسة (كلمة «الاسم»/«name» في A أو «الهاتف»/«phone» في B)؛
+   * عند الشك يُعامل الصف الأول كبيانات ويكشف التحقق الصفوف الرديئة.
+   * الصفوف الفارغة تماماً تُتجاهل بصمت. المديرية ليست في الملف —
+   * تُترك فارغة دائماً (تُعدَّل لاحقاً من بطاقة المتدرب).
+   *
+   * قاعدة التكرار: الهاتف المُطبَّع (تُحذف المسافات والواصلات
+   * والأقواس والنقاط، وتُحوَّل الأرقام المشرقية إلى لاتينية، ويُبقى
+   * + البادئة) يطابق هاتف متدرب محدد حالياً في المجموعة/الدورة
+   * المستهدفة، أو هاتفاً قُبل سابقاً في الملف نفسه. لا يُفحص
+   * التكرار على مستوى الدليل كاملاً (التطبيق نفسه لا يفرض فرادة
+   * الهاتف). صيغتا «099…» و«9639…+» تُعاملان كرقمين مختلفين.
+   * قاعدة الهاتف: بعد التطبيع «+؟» + 9–15 رقماً (لا تحقق أشد
+   * للهاتف في التطبيق حالياً).
+   */
+  var IMPORT_HEADER_A = ['الاسم', 'اسم المتدرب', 'المتدرب', 'الاسم الكامل', 'الأسماء',
+    'name', 'full name', 'trainee', 'trainee name'];
+  var IMPORT_HEADER_B = ['رقم الهاتف', 'الهاتف', 'الجوال', 'رقم الجوال',
+    'phone', 'mobile', 'telephone', 'phone number'];
+
+  var IMPORT_SKIP_REASONS = {
+    'duplicate': 'مكرر — رقم الهاتف موجود مسبقاً',
+    'missing-name': 'الاسم مفقود',
+    'missing-phone': 'رقم الهاتف مفقود',
+    'invalid-phone': 'رقم الهاتف غير صالح'
+  };
+
+  // تطبيع رقم هاتف للمقارنة والتحقق والحفظ.
+  function normalizeImportPhone(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    s = s.replace(/[٠-٩]/g, function (d) { return String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)); });
+    return s.replace(/[\s\-().]/g, '');
+  }
+
+  function isValidImportPhone(phone) {
+    return /^\+?[0-9]{9,15}$/.test(phone || '');
+  }
+
+  function isImportHeaderRow(a, b) {
+    var la = String(a || '').trim().toLowerCase();
+    var lb = String(b || '').trim().toLowerCase();
+    return IMPORT_HEADER_A.indexOf(la) !== -1 || IMPORT_HEADER_B.indexOf(lb) !== -1;
+  }
+
+  // نص خلية (الأرقام تُحوَّل نصاً — الهاتف قد يُخزَّن رقماً في إكسل).
+  function importCellText(ws, r, c) {
+    var v = ws.getRow(r).getCell(c).value;
+    if (v == null) return '';
+    if (typeof v === 'object') {
+      if (v.text != null) return String(v.text).trim();
+      if (v.result != null) return String(v.result).trim();
+      return '';
+    }
+    return String(v).trim();
+  }
+
+  // تحليل مصنّف محمّل (الورقة الأولى فقط):
+  // {added: [{row, name, phone}], skipped: [{row, name, phone, reason}],
+  //  headerSkipped: bool} — row رقم الصف في ملف إكسل (يبدأ من 1).
+  // existingPhones: هواتف (خام) المتدربين المحددين حالياً في
+  // المجموعة/الدورة المستهدفة.
+  function parseTraineeWorkbook(wb, existingPhones) {
+    var ws = wb && wb.worksheets && wb.worksheets[0];
+    var added = [], skipped = [];
+    var seen = {};
+    (Array.isArray(existingPhones) ? existingPhones : []).forEach(function (p) {
+      var n = normalizeImportPhone(p);
+      if (n) seen[n] = true;
+    });
+    if (!ws) return { added: added, skipped: skipped, headerSkipped: false };
+    var firstRow = 1;
+    var headerSkipped = isImportHeaderRow(importCellText(ws, 1, 1), importCellText(ws, 1, 2));
+    if (headerSkipped) firstRow = 2;
+    for (var r = firstRow; r <= ws.rowCount; r++) {
+      var name = importCellText(ws, r, 1);
+      var phoneRaw = importCellText(ws, r, 2);
+      if (!name && !phoneRaw) continue; // صف فارغ تماماً — يُتجاهل بصمت
+      if (!name) { skipped.push({ row: r, name: '', phone: phoneRaw, reason: 'missing-name' }); continue; }
+      if (!phoneRaw) { skipped.push({ row: r, name: name, phone: '', reason: 'missing-phone' }); continue; }
+      var phone = normalizeImportPhone(phoneRaw);
+      if (!isValidImportPhone(phone)) {
+        skipped.push({ row: r, name: name, phone: phoneRaw, reason: 'invalid-phone' });
+        continue;
+      }
+      if (seen[phone]) {
+        skipped.push({ row: r, name: name, phone: phoneRaw, reason: 'duplicate' });
+        continue;
+      }
+      seen[phone] = true;
+      added.push({ row: r, name: name, phone: phone });
+    }
+    return { added: added, skipped: skipped, headerSkipped: headerSkipped };
+  }
+
+  // قراءة مصنّف من ArrayBuffer/Buffer (المتصفح وNode).
+  function importTraineesFromBuffer(buffer, existingPhones) {
+    try {
+      var E = getExcelJS();
+      var wb = new E.Workbook();
+      return wb.xlsx.load(buffer).then(function () {
+        return parseTraineeWorkbook(wb, existingPhones);
+      });
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  }
+
+  // قراءة ملف ‎.xlsx من حقل إدخال ملفات (FileReader → ArrayBuffer).
+  function importTraineesFromFile(file, existingPhones) {
+    if (typeof FileReader === 'undefined') {
+      return Promise.reject(new Error('متصفحك لا يدعم قراءة الملفات'));
+    }
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        importTraineesFromBuffer(reader.result, existingPhones).then(resolve, reject);
+      };
+      reader.onerror = function () {
+        reject(new Error('تعذّرت قراءة الملف'));
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  /* ---------- 15. استيراد المديريات من إكسل (v2.3 — N) ----------
+   * العمود A = اسم المديرية (عمود واحد فقط). الصف الأول يُتخطى إن
+   * كان ترويسة (كلمة «المديرية»/«directorate» في A)؛ عند الشك
+   * يُعامل الصف الأول كبيانات. الصفوف الفارغة تماماً تُتجاهل بصمت.
+   * قاعدة التكرار: الاسم المُطبَّع (تقليم + أحرف لاتينية بلا تمييز
+   * حالة) يطابق مديرية محفوظة أو اسماً قُبل سابقاً في الملف نفسه.
+   */
+  var IMPORT_DIRECTORATE_HEADERS = ['المديرية', 'اسم المديرية', 'المديريات',
+    'directorate', 'directorate name', 'directorates'];
+
+  var IMPORT_DIRECTORATE_SKIP_REASONS = {
+    'duplicate': 'مكررة — المديرية موجودة مسبقاً',
+    'missing-name': 'الاسم مفقود'
+  };
+
+  // تطبيع اسم مديرية للمقارنة (تقليم + حالة لاتينية صغرى).
+  function normalizeDirectorateName(raw) {
+    return String(raw == null ? '' : raw).trim().toLowerCase();
+  }
+
+  function isDirectorateHeaderRow(a) {
+    return IMPORT_DIRECTORATE_HEADERS.indexOf(normalizeDirectorateName(a)) !== -1;
+  }
+
+  // تحليل مصنّف محمّل (الورقة الأولى فقط):
+  // {added: [{row, name}], skipped: [{row, name, reason}],
+  //  headerSkipped: bool} — row رقم الصف في ملف إكسل (يبدأ من 1).
+  // existingNames: أسماء المديريات المحفوظة حالياً.
+  function parseDirectorateWorkbook(wb, existingNames) {
+    var ws = wb && wb.worksheets && wb.worksheets[0];
+    var added = [], skipped = [];
+    var seen = {};
+    (Array.isArray(existingNames) ? existingNames : []).forEach(function (n) {
+      var norm = normalizeDirectorateName(n);
+      if (norm) seen[norm] = true;
+    });
+    if (!ws) return { added: added, skipped: skipped, headerSkipped: false };
+    var firstRow = 1;
+    var headerSkipped = isDirectorateHeaderRow(importCellText(ws, 1, 1));
+    if (headerSkipped) firstRow = 2;
+    for (var r = firstRow; r <= ws.rowCount; r++) {
+      var name = importCellText(ws, r, 1);
+      if (!name) continue; // صف فارغ — يُتجاهل بصمت
+      var norm = normalizeDirectorateName(name);
+      if (seen[norm]) {
+        skipped.push({ row: r, name: name, reason: 'duplicate' });
+        continue;
+      }
+      seen[norm] = true;
+      added.push({ row: r, name: name });
+    }
+    return { added: added, skipped: skipped, headerSkipped: headerSkipped };
+  }
+
+  // قراءة مصنّف من ArrayBuffer/Buffer (المتصفح وNode).
+  function importDirectoratesFromBuffer(buffer, existingNames) {
+    try {
+      var E = getExcelJS();
+      var wb = new E.Workbook();
+      return wb.xlsx.load(buffer).then(function () {
+        return parseDirectorateWorkbook(wb, existingNames);
+      });
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  }
+
+  // قراءة ملف ‎.xlsx من حقل إدخال ملفات (FileReader → ArrayBuffer).
+  function importDirectoratesFromFile(file, existingNames) {
+    if (typeof FileReader === 'undefined') {
+      return Promise.reject(new Error('متصفحك لا يدعم قراءة الملفات'));
+    }
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        importDirectoratesFromBuffer(reader.result, existingNames).then(resolve, reject);
+      };
+      reader.onerror = function () {
+        reject(new Error('تعذّرت قراءة الملف'));
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   /* ---------- الواجهة العامة ---------- */
   var api = {
     exportAttendance: exportAttendance,
@@ -1956,9 +2478,21 @@
     exportHolidays: exportHolidays,
     openExportPicker: openExportPicker,
     quickExport: quickExport,
+    importTraineesFromFile: importTraineesFromFile,
+    importTraineesFromBuffer: importTraineesFromBuffer,
+    parseTraineeWorkbook: parseTraineeWorkbook,
+    IMPORT_SKIP_REASONS: IMPORT_SKIP_REASONS,
+    importDirectoratesFromFile: importDirectoratesFromFile,
+    importDirectoratesFromBuffer: importDirectoratesFromBuffer,
+    parseDirectorateWorkbook: parseDirectorateWorkbook,
+    IMPORT_DIRECTORATE_SKIP_REASONS: IMPORT_DIRECTORATE_SKIP_REASONS,
     // أدوات داخلية مكشوفة للاختبار فقط
     _sanitizeFilename: sanitizeFilename,
     _asDateText: asDateText,
+    _normalizeImportPhone: normalizeImportPhone,
+    _isValidImportPhone: isValidImportPhone,
+    _isImportHeaderRow: isImportHeaderRow,
+    _normalizeDirectorateName: normalizeDirectorateName,
     _lastWrite: null,
     _setSink: function (fn) { bufferSink = fn; }
   };

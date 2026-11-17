@@ -177,6 +177,30 @@
     return setInterval(tick, 20000);
   }
 
+  // هل هذا التاريخ يوم عطلة أسبوعية؟ (v2.3 — W3)
+  // أيام العطلة تُقرأ من TadreebDB.getWeekendDays() إن وُجدت (إعداد
+  // مشترك من الإعدادات العامة)، وإلا الافتراضي [5، 6] (جمعة + سبت).
+  // التاريخ «YYYY-MM-DD» يُحسب يوم أسبوعه من مكوناته مباشرةً
+  // (UTC) — لا يعتمد على ساعة الجهاز ولا منطقته الزمنية؛ المدخلات
+  // الأخرى (Date) تُحسب بتوقيت دمشق عبر damascusParts.
+  function isWeekend(dateInput) {
+    var days = [5, 6];
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.getWeekendDays === 'function') {
+        var d = window.TadreebDB.getWeekendDays();
+        if (Array.isArray(d) && d.length) days = d;
+      }
+    } catch (e) { /* الافتراضي أعلاه */ }
+    var wd = -1;
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateInput == null ? '' : dateInput).trim());
+    if (m) {
+      wd = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10))).getUTCDay();
+    } else {
+      wd = damascusParts(toDate(dateInput)).weekday;
+    }
+    return days.indexOf(wd) !== -1;
+  }
+
   window.TadreebTime = {
     TZ: TZ,
     now: now,
@@ -188,6 +212,7 @@
     formatDateShort: formatDateShort,
     formatDateTime: formatDateTime,
     startClock: startClock,
-    parts: parts
+    parts: parts,
+    isWeekend: isWeekend
   };
 })();

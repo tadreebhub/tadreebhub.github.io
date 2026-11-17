@@ -83,6 +83,119 @@
     return true;
   }
 
+  // ---------- مساعدات v2.3 (عرض الرزنامة) ----------
+
+  // آخر حاوية رُسمت فيها الرزنامة (لإعادة الرسم عند وصول أيام
+  // العطلة الأسبوعية غير المتزامنة، ولفتح عرض اليوم من أي مكان).
+  var lastContainer = null;
+
+  // أيام العطلة الأسبوعية: افتراضياً الجمعة + السبت (5، 6). يقرأها
+  // من window.TadreebDB.getWeekendDays() إن وُجدت (يملكها عامل
+  // آخر) — مصفوفة متزامنة تُستخدم فوراً، ووعدٌ يُخزَّن عند حله مع
+  // إعادة رسم واحدة إن تغيّرت الأيام. أي غياب أو خطأ يعيد الافتراضي.
+  var weekendDaysCache = null;
+  var weekendSigRendered = null;
+  function getWeekendDays() {
+    if (weekendDaysCache) return weekendDaysCache;
+    var days = [5, 6];
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.getWeekendDays === 'function') {
+        var res = window.TadreebDB.getWeekendDays();
+        if (Array.isArray(res)) return res;
+        if (res && typeof res.then === 'function') {
+          res.then(function (d) {
+            if (!Array.isArray(d)) return;
+            weekendDaysCache = d;
+            var sig = d.slice().sort().join(',');
+            if (sig !== weekendSigRendered && lastContainer && lastContainer.isConnected) {
+              render(lastContainer);
+            }
+          }).catch(function () { /* يبقى الافتراضي */ });
+        }
+      }
+    } catch (e) { /* يبقى الافتراضي */ }
+    return days;
+  }
+  function isWeekendDate(dateStr) {
+    var d = UI.parseDateStr(dateStr);
+    if (!d) return false;
+    return getWeekendDays().indexOf(d.getDay()) !== -1;
+  }
+
+  // تسمية نوع القاعة في صفوف جدول اليوم: «حاسوب» لقاعات الحاسوب
+  // فقط؛ الإدارية أو الغائبة (الافتراضي) بلا لاحقة. النوع في حقل
+  // hallType (يملكه عامل آخر — TadreebDB.hallTypeOf مصدر الحقيقة
+  // عند توفره)، مع قراءة دفاعية لحقل type القديم.
+  function hallTypeLabel(hall) {
+    if (!hall) return '';
+    var t = '';
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.hallTypeOf === 'function') {
+        t = window.TadreebDB.hallTypeOf(hall) || '';
+      }
+    } catch (e) { t = ''; }
+    if (!t) t = hall.hallType || hall.type || '';
+    return t === 'computer' ? 'حاسوب' : '';
+  }
+
+  // صيغ العدّ العربية: (1 مفرد، 2 مثنى، 3+ جمعاً مع العدد).
+  function countText(n, one, two, many) {
+    if (n === 1) return one;
+    if (n === 2) return two;
+    return n + ' ' + many;
+  }
+  function freePeriodsText(n) {
+    if (n <= 0) return 'اليوم مكتمل';
+    return countText(n, 'فترة واحدة حرة', 'فترتان حرتان', 'فترات حرة');
+  }
+
+  // خريطة توفر الفترات ليوم ما: الفترة حرة = قاعة واحدة على الأقل
+  // غير مشغولة فيها. المشغول: جلسة مجدولة غير ملغاة ولا عطلة، أو
+  // اجتماع مجدول غير ملغى — القاعدة نفسها في checkHallAvailability.
+  // تحترم فلتر القاعة إن وُضع (التوفر يُحسب لتلك القاعة وحدها)؛
+  // فلترا الدورة والمدرب لا يغيّران التوفر الفيزيائي للقاعات.
+  // بلا قاعات مسجلة أصلاً: كل الفترات متاحة.
+  function periodFreeMap(dateStr) {
+    var periods = App.Store.getAll('periods');
+    var halls = App.Store.getAll('halls');
+    var map = {};
+    periods.forEach(function (p) { map[p.id] = true; });
+    var hallIds = halls.map(function (h) { return h.id; });
+    if (filterState.hallId) hallIds = [filterState.hallId];
+    if (!hallIds.length) return map;
+    var busy = {};
+    function mark(periodId, hallId) {
+      if (!periodId || !hallId) return;
+      if (hallIds.indexOf(hallId) === -1) return;
+      (busy[periodId] = busy[periodId] || {})[hallId] = true;
+    }
+    App.Store.getAll('sessions').forEach(function (s) {
+      if (s.date === dateStr && s.state !== 'cancelled' && s.state !== 'holiday') mark(s.periodId, s.hallId);
+    });
+    App.Store.getAll('meetings').forEach(function (m) {
+      if (m.date === dateStr && m.status !== 'cancelled') mark(m.periodId, m.hallId);
+    });
+    periods.forEach(function (p) {
+      var b = busy[p.id] || {};
+      map[p.id] = hallIds.some(function (hid) { return !b[hid]; });
+    });
+    return map;
+  }
+  function countFreePeriods(dateStr) {
+    var map = periodFreeMap(dateStr);
+    var n = 0;
+    Object.keys(map).forEach(function (k) { if (map[k]) n++; });
+    return n;
+  }
+
+  // فتح عرض اليوم لتاريخ ما (من نقر يوم في عرض الشهر أو النطاق).
+  function openDayView(dateStr) {
+    state.dayDate = dateStr;
+    state.view = 'day';
+    userPickedView = true;
+    if (lastContainer) render(lastContainer);
+  }
+
   function sundayOf(dateStr) {
     var d = UI.parseDateStr(dateStr) || new Date();
     d.setDate(d.getDate() - d.getDay());
@@ -160,6 +273,10 @@
 
   function render(container) {
     ensureState();
+    lastContainer = container;
+    // توقيع أيام العطلة الأسبوعية المعروضة الآن (لإعادة الرسم مرة
+    // واحدة فقط عند وصولها غير المتزامنة بقيمة مختلفة).
+    weekendSigRendered = getWeekendDays().slice().sort().join(',');
     // العرض الافتراضي من إعدادات العرض (الافتراضي: أسبوع كما قبل) —
     // يُطبَّق عند فتح الرزنامة فقط ما دام المستخدم لم يختر عرضاً
     // يدوياً في هذه الزيارة.
@@ -364,7 +481,16 @@
       openMeetingForm(null, null);
     });
 
-    // زر «حجز اجتماع» على صف قاعة متاحة في عرض اليوم — يفتح
+    // النقر على أي يوم في عرض الشهر أو النطاق المخصص يفتح عرض
+    // اليوم لذلك التاريخ (v2.3). نقر شريحة جلسة أو اجتماع داخل
+    // الخلية يوقف الانتشار في معالجه فلا يفتح عرض اليوم.
+    container.querySelectorAll('[data-cal-day-open]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        openDayView(el.getAttribute('data-cal-day-open'));
+      });
+    });
+
+    // زر «حجز اجتماع» على خلية قاعة متاحة في عرض اليوم — يفتح
     // النموذج معبأً بالتاريخ والفترة والقاعة.
     container.querySelectorAll('[data-hall-book]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -401,9 +527,10 @@
       render(container);
     });
 
-    // النقر على خلية فارغة (لا على شريحة) يفتح نموذج اجتماع عارض
-    // معبأً بتاريخ الخلية وفترتها — للكتّاب فقط. خلايا العطل بلا
-    // سمة data-cal-date فلا تفتح النموذج.
+    // النقر على خلية فارغة في عرض الأسبوع (لا على شريحة) يفتح نموذج
+    // اجتماع عارض معبأً بتاريخ الخلية وفترتها — للكتّاب فقط. خلايا
+    // العطل بلا سمة data-cal-date فلا تفتح النموذج. خلايا الشهر لا
+    // تحمل data-cal-date أصلاً (نقرها يفتح عرض اليوم — v2.3).
     if (App.canWrite()) {
       container.querySelectorAll('td[data-cal-date]').forEach(function (td) {
         td.addEventListener('click', function (e) {
@@ -444,8 +571,20 @@
     html += '<div class="card-white"><div class="table-wrap"><table><thead><tr><th>الفترة</th>';
     days.forEach(function (day) {
       var d = UI.parseDateStr(day.date);
+      // ملخص توفر اليوم (v2.3): عدد الفترات الحرة في رأس العمود؛
+      // العطلة ويوم العطلة الأسبوعية يظهران بوسمهما بدل الملخص.
+      var daySummary = '';
+      if (holidays[day.date]) {
+        daySummary = '<div class="cal-week-summary cal-week-full">عطلة</div>';
+      } else if (isWeekendDate(day.date)) {
+        daySummary = '<div class="cal-week-summary cal-week-full">عطلة أسبوعية</div>';
+      } else if (periods.length) {
+        var freeN = countFreePeriods(day.date);
+        daySummary = '<div class="cal-week-summary' + (freeN === 0 ? ' cal-week-full' : '') + '">' +
+          UI.escapeHtml(freePeriodsText(freeN)) + '</div>';
+      }
       html += '<th>' + UI.escapeHtml(UI.WEEKDAYS[d.getDay()]) + ' ' + d.getDate() +
-        (day.date === today ? ' <span class="pill pill-navy">اليوم</span>' : '') + '</th>';
+        (day.date === today ? ' <span class="pill pill-navy">اليوم</span>' : '') + daySummary + '</th>';
     });
     html += '</tr></thead><tbody>';
 
@@ -480,13 +619,19 @@
               var course = App.Store.get('courses', sess.courseId);
               var cancelled = sess.state === 'cancelled';
               var holiday = sess.state === 'holiday';
+              // اسم المدرب سطراً ثانياً (v2.3) — السطر الأول يبقى
+              // «القاعة: الدورة» كما هو تماماً.
+              var trainer = null;
+              if (course && course.trainerId) trainer = App.Store.get('trainers', course.trainerId);
               html += '<div class="hl ' + (cancelled ? 'hl-cancel' : holiday ? 'hl-holiday' : 'hl-busy') + '" data-session-open="' + UI.escapeHtml(sess.id) + '">' +
                 UI.escapeHtml(shortHall(hall.name)) + ': ' + UI.escapeHtml(course ? course.name : '') +
-                (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') + '</div>';
+                (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') +
+                (trainer ? '<div class="cal-hl-sub">' + UI.escapeHtml(trainer.name) + '</div>' : '') + '</div>';
             }
             if (meeting) {
               html += '<div class="hl hl-meeting" data-meeting-open="' + UI.escapeHtml(meeting.id) + '">' +
-                UI.escapeHtml(shortHall(hall.name)) + ': اجتماع: ' + UI.escapeHtml(meeting.title) + '</div>';
+                UI.escapeHtml(shortHall(hall.name)) + ': اجتماع: ' + UI.escapeHtml(meeting.title) +
+                (meeting.organizer ? '<div class="cal-hl-sub">' + UI.escapeHtml(meeting.organizer) + '</div>' : '') + '</div>';
             }
           });
           // جلسات بلا قاعة في هذا الموعد
@@ -497,8 +642,11 @@
             var course = App.Store.get('courses', s.courseId);
             var cancelled = s.state === 'cancelled';
             var holiday = s.state === 'holiday';
+            var trainer = null;
+            if (course && course.trainerId) trainer = App.Store.get('trainers', course.trainerId);
             html += '<div class="hl ' + (cancelled ? 'hl-cancel' : holiday ? 'hl-holiday' : 'hl-busy') + '" data-session-open="' + UI.escapeHtml(s.id) + '">بلا قاعة: ' +
-              UI.escapeHtml(course ? course.name : '') + (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') + '</div>';
+              UI.escapeHtml(course ? course.name : '') + (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') +
+              (trainer ? '<div class="cal-hl-sub">' + UI.escapeHtml(trainer.name) + '</div>' : '') + '</div>';
           });
         }
         html += '</td>';
@@ -520,16 +668,16 @@
     var trainers = App.Store.getAll('trainers').slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
     });
-    function sel(id, label, items, current) {
+    function sel(id, label, items, current, labelFn) {
       var opts = '<option value="">الكل</option>' + items.map(function (it) {
         return '<option value="' + UI.escapeHtml(it.id) + '"' + (it.id === current ? ' selected' : '') + '>' +
-          UI.escapeHtml(it.name) + '</option>';
+          UI.escapeHtml(labelFn ? labelFn(it) : it.name) + '</option>';
       }).join('');
       return '<label class="muted" for="' + id + '">' + label + '</label>' +
         '<select class="input" id="' + id + '">' + opts + '</select>';
     }
     return '<div class="toolbar">' +
-      sel('cal-filter-course', 'الدورة', courses, filterState.courseId) +
+      sel('cal-filter-course', 'مجموعة التدريب', courses, filterState.courseId, function (c) { return App.groupDisplayName(c); }) +
       sel('cal-filter-hall', 'القاعة', halls, filterState.hallId) +
       sel('cal-filter-trainer', 'المدرب', trainers, filterState.trainerId) +
       '</div>';
@@ -560,47 +708,17 @@
       '<div class="list-row-actions row-actions"><button class="btn btn-outline btn-sm" type="button">خيارات</button></div></div>';
   }
 
-  // صف قاعة مشغولة بجلسة في عرض اليوم: اسم القاعة أولاً +
-  // «مشغولة» + اسم الدورة والمدرب؛ النقر يفتح ورقة إجراءات الجلسة.
-  function hallBusyRow(hall, e) {
-    return '<div class="list-row clickable" data-session-open="' + UI.escapeHtml(e.id) + '">' +
-      '<div class="list-row-main"><div class="list-row-title"><strong>' + UI.escapeHtml(hall.name) + '</strong> ' +
-      '<span class="pill pill-navy">مشغولة</span></div>' +
-      '<div class="list-row-meta muted">' + UI.escapeHtml(e.course || '') +
-      (e.trainer ? ' · ' + UI.escapeHtml(e.trainer) : '') + '</div></div>' +
-      '<div class="list-row-actions row-actions"><button class="btn btn-outline btn-sm" type="button">خيارات</button></div></div>';
-  }
-
-  // صف قاعة مشغولة باجتماع عارض في عرض اليوم.
-  function hallMeetingRow(hall, e) {
-    return '<div class="list-row clickable" data-meeting-open="' + UI.escapeHtml(e.id) + '">' +
-      '<div class="list-row-main"><div class="list-row-title"><strong>' + UI.escapeHtml(hall.name) + '</strong> ' +
-      '<span class="pill pill-violet">اجتماع</span></div>' +
-      '<div class="list-row-meta muted">اجتماع: ' + UI.escapeHtml(e.title || '') + '</div></div>' +
-      '<div class="list-row-actions row-actions"><button class="btn btn-outline btn-sm" type="button">خيارات</button></div></div>';
-  }
-
-  // صف قاعة متاحة في عرض اليوم — مع زر «حجز اجتماع» ظاهر للكتّاب
-  // (يفتح نموذج الاجتماع العارض معبأً بالتاريخ والفترة والقاعة —
-  // نفس إجراء النقر على خلية فارغة في عرض الأسبوع).
-  function hallFreeRow(hall, period, canWrite) {
-    return '<div class="list-row"><div class="list-row-main">' +
-      '<div class="list-row-title"><strong>' + UI.escapeHtml(hall.name) + '</strong> ' +
-      '<span class="pill pill-green">متاحة</span></div></div>' +
-      (canWrite ? '<div class="list-row-actions row-actions"><button class="btn btn-outline btn-sm" type="button" data-hall-book="' +
-        UI.escapeHtml(period.id) + '" data-hall-id="' + UI.escapeHtml(hall.id) + '">حجز اجتماع</button></div>' : '') +
-      '</div>';
-  }
-
-  // عرض اليوم: منتقي تاريخ + كل فترة تعرض قاعاتها (v2.1 — بند 7):
-  // كل قاعة صفٌّ بحالتها (متاحة / مشغولة + اسم الدورة / اجتماع +
-  // العنوان)، فتوفر القاعات ظاهر بلا فتح أي شيء؛ الفترة بلا جلسات
-  // تعرض قاعاتها متاحةً بدل «لا جلسات». قاعدة الإشغال هي نفسها
-  // في checkHallAvailability (db.js) محسوبةً من مخزن العرض نفسه
-  // كما في عرض الأسبوع: الجلسة غير الملغاة ولا العطلة تشغل قاعتها،
-  // والاجتماع غير الملغى يشغل قاعته؛ الملغاة/العطلة لا تشغلان —
-  // فتظهران كمدخلات مستقلة تحت صفوف القاعات مع الجلسات بلا قاعة.
-  // الجدول نفسه محفوظ (الاختبارات تقرأ نصه).
+  // عرض اليوم (v2.3): جدول قاعات × فترات — الأعمدة فترات ديناميكية
+  // (من إعدادات الفترات، + عمود لكل فترة محذوفة ما زالت لها جلسات
+  // هذا اليوم، + عمود «بلا فترة» عند الحاجة)، والصفوف قاعات (+ صف
+  // «بلا قاعة» عند وجود جلسات بلا قاعة). كل خلية = الجلسة في تلك
+  // القاعة والفترة (اسم الدورة + المدرب، ونقرها يفتح ورقة الجلسة)
+  // أو الاجتماع (عنوانه، ونقره يفتح ورقة الاجتماع) أو «متاحة»
+  // (نقرها — للكتّاب — يحجز اجتماعاً معبأً بالتاريخ والفترة
+  // والقاعة). قاعدة الإشغال هي نفسها في checkHallAvailability:
+  // الجلسة غير الملغاة ولا العطلة تشغل قاعتها، والاجتماع غير
+  // الملغى يشغل قاعته؛ الملغاة/العطلة لا تشغلان فتظهر في قسم
+  // «جلسات أخرى» أسفل الجدول مع مدخلات القاعات المحذوفة.
   function renderDay(today) {
     var Store = App.Store;
     var periods = Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
@@ -612,9 +730,11 @@
     var data = App.buildDayData(state.dayDate, filterState);
     var entries = data.days[0].sessions;
     var canWrite = App.canWrite();
+    var isWeekend = isWeekendDate(state.dayDate);
 
     var html = '<div class="toolbar"><strong>' + UI.escapeHtml(UI.fmtDateFull(state.dayDate)) + '</strong>' +
       (state.dayDate === today ? '<span class="pill pill-navy">اليوم</span>' : '') +
+      (isWeekend ? '<span class="pill pill-amber">عطلة أسبوعية</span>' : '') +
       '<label class="muted" for="cal-day-input">اختر يوماً:</label>' +
       '<input type="date" id="cal-day-input" class="input" value="' + UI.escapeHtml(state.dayDate) + '">' +
       '</div>';
@@ -631,57 +751,106 @@
       '<span><span class="dot" style="background:#B45309"></span>عطلة</span>' +
       '</div>';
 
-    // t-compact: على الهاتف يلغي الحد الأدنى 600px فيلائم الجدول
-    // الشاشة بدل التمرير الجانبي — فتبقى صفوف القاعات والأزرار
-    // ظاهرة كاملة دون قص (على سطح المكتب بلا أثر).
-    html += '<div class="card-white"><div class="table-wrap"><table class="t-compact"><thead><tr><th>الفترة</th><th>القاعات والجلسات</th></tr></thead><tbody>';
-    if (!periods.length) {
-      html += '<tr><td colspan="2"><div class="muted">لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة.</div></td></tr>';
+    if (!periods.length && !entries.length) {
+      html += '<div class="card-white"><div class="muted">لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة.</div></div>';
+      return html;
     }
-    periods.forEach(function (p) {
-      var list = entries.filter(function (e) { return e.periodId === p.id; });
-      html += '<tr><td><strong>' + UI.escapeHtml(p.label) + '</strong><div class="muted">' + fmtRange12(p.start, p.end) + '</div></td><td>';
-      if (!halls.length) {
-        html += '<div class="muted">لا قاعات مسجلة</div>';
-        list.forEach(function (e) { html += dayEntryRow(e, false); });
-      } else {
-        // مدخلات ظهرت شاغلةً لقاعة — لا تُعاد كمدخلات مستقلة.
-        var shownIds = {};
-        halls.forEach(function (hall) {
-          var occupant = null;
-          var meeting = null;
-          list.forEach(function (e) {
-            if (e.hallId !== hall.id) return;
-            if (!occupant && e.kind === 'session' && e.state !== 'cancelled' && e.state !== 'holiday') occupant = e;
-            if (!meeting && e.kind === 'meeting') meeting = e;
-          });
-          if (occupant) {
-            shownIds[occupant.id] = true;
-            html += hallBusyRow(hall, occupant);
-          } else if (meeting) {
-            shownIds[meeting.id] = true;
-            html += hallMeetingRow(hall, meeting);
-          } else {
-            html += hallFreeRow(hall, p, canWrite);
-          }
-        });
-        // الباقي: ملغاة/عطلة + بلا قاعة + قاعة محذوفة.
-        list.forEach(function (e) {
-          if (!shownIds[e.id]) html += dayEntryRow(e, false);
-        });
+    if (!halls.length) {
+      html += '<div class="card-white"><div class="muted">لا قاعات مسجلة</div>';
+      entries.forEach(function (e) { html += dayEntryRow(e, true); });
+      html += '</div>';
+      return html;
+    }
+
+    // أعمدة الفترات: المعروفة أولاً (بترتيبها)، ثم المحذوفة التي ما
+    // زالت لها مدخلات هذا اليوم (بترتيب ظهورها)، ثم «بلا فترة».
+    var columns = periods.map(function (p) {
+      return { id: p.id, label: p.label, time: fmtRange12(p.start, p.end) };
+    });
+    var knownIds = {};
+    periods.forEach(function (p) { knownIds[p.id] = true; });
+    var orphanIds = [];
+    entries.forEach(function (e) {
+      if (e.periodId && !knownIds[e.periodId] && orphanIds.indexOf(e.periodId) === -1) orphanIds.push(e.periodId);
+    });
+    orphanIds.forEach(function (id) { columns.push({ id: id, label: 'فترة محذوفة', time: '' }); });
+    if (entries.some(function (e) { return !e.periodId; })) columns.push({ id: '', label: 'بلا فترة', time: '' });
+
+    // مدخلات ظهرت شاغلةً لخلية — لا تُعاد في «جلسات أخرى».
+    var shownIds = {};
+    function slotLookup(hallId, periodId) {
+      var occupant = null, meeting = null;
+      entries.forEach(function (e) {
+        if (e.periodId !== periodId) return;
+        if ((e.hallId || null) !== (hallId || null)) return;
+        if (e.kind === 'session' && e.state !== 'cancelled' && e.state !== 'holiday' && !occupant) occupant = e;
+        if (e.kind === 'meeting' && !meeting) meeting = e;
+      });
+      return { occupant: occupant, meeting: meeting };
+    }
+    // محتوى خلية: جلسة و/أو اجتماع، أو «متاحة» (صف القاعة) أو «—»
+    // (صف «بلا قاعة» — لا قاعة تُحجز هناك).
+    function slotHtml(slot, bookable) {
+      var out = '';
+      if (slot.occupant) {
+        var occ = slot.occupant;
+        shownIds[occ.id] = true;
+        out += '<div class="cal-cell cal-cell-session" data-session-open="' + UI.escapeHtml(occ.id) + '">' +
+          '<div class="cal-cell-title">' + UI.escapeHtml(occ.course || '') + '</div>' +
+          (occ.trainer ? '<div class="cal-cell-sub">' + UI.escapeHtml(occ.trainer) + '</div>' : '') +
+          '<span class="cal-cell-pill">مشغولة</span></div>';
       }
-      html += '</td></tr>';
+      if (slot.meeting) {
+        var mt = slot.meeting;
+        shownIds[mt.id] = true;
+        out += '<div class="cal-cell cal-cell-meeting" data-meeting-open="' + UI.escapeHtml(mt.id) + '">' +
+          '<div class="cal-cell-title">اجتماع: ' + UI.escapeHtml(mt.title || '') + '</div></div>';
+      }
+      if (!out) {
+        out = bookable
+          ? '<div class="cal-free">متاحة</div>' + (canWrite ? '<span class="cal-book-link">حجز اجتماع</span>' : '')
+          : '<div class="cal-free cal-free-none">—</div>';
+      }
+      return out;
+    }
+
+    html += '<div class="card-white"><div class="table-wrap"><table class="cal-day-table"><thead><tr><th>القاعة</th>';
+    columns.forEach(function (c) {
+      html += '<th>' + UI.escapeHtml(c.label) +
+        (c.time ? '<div class="cal-day-period-time">' + c.time + '</div>' : '') + '</th>';
     });
-    // مدخلات بلا فترة معروفة (فترة حُذفت بعد توليد الجلسة مثلاً).
-    var orphan = entries.filter(function (e) {
-      return !periods.some(function (p) { return p.id === e.periodId; });
+    html += '</tr></thead><tbody>';
+    halls.forEach(function (hall) {
+      var typeLabel = hallTypeLabel(hall);
+      html += '<tr><th class="cal-day-hall">' + UI.escapeHtml(hall.name) +
+        (typeLabel ? ' <span class="cal-hall-type">· ' + UI.escapeHtml(typeLabel) + '</span>' : '') + '</th>';
+      columns.forEach(function (c) {
+        var slot = slotLookup(hall.id, c.id);
+        var isFree = !slot.occupant && !slot.meeting;
+        // سمة الحجز على الخلايا الحرة فقط — فلا يفتح نقر خلية
+        // مشغولة نموذج اجتماع.
+        html += '<td' + (isFree && canWrite
+          ? ' class="cal-day-free" data-hall-book="' + UI.escapeHtml(c.id) + '" data-hall-id="' + UI.escapeHtml(hall.id) + '"'
+          : '') + '>' + slotHtml(slot, true) + '</td>';
+      });
+      html += '</tr>';
     });
-    if (orphan.length) {
-      html += '<tr><td><strong>بلا فترة</strong></td><td>';
-      orphan.forEach(function (e) { html += dayEntryRow(e, false); });
-      html += '</td></tr>';
+    if (entries.some(function (e) { return !e.hallId; })) {
+      html += '<tr><th class="cal-day-hall cal-nohall">بلا قاعة</th>';
+      columns.forEach(function (c) {
+        html += '<td>' + slotHtml(slotLookup(null, c.id), false) + '</td>';
+      });
+      html += '</tr>';
     }
     html += '</tbody></table></div></div>';
+
+    // الباقي: ملغاة/عطلة + قاعة محذوفة + شاغل ثانٍ في خلية واحدة.
+    var others = entries.filter(function (e) { return !shownIds[e.id]; });
+    if (others.length) {
+      html += '<div class="card-white"><div class="cal-other-title">جلسات أخرى</div>';
+      others.forEach(function (e) { html += dayEntryRow(e, true); });
+      html += '</div>';
+    }
     return html;
   }
 
@@ -707,7 +876,13 @@
       var holidayName = holidays[day.date];
       if (!day.sessions.length && !holidayName) return;
       shown++;
-      html += '<div style="margin-bottom:16px"><strong>' + UI.escapeHtml(UI.fmtDateFull(day.date)) + '</strong><div style="margin-top:6px">';
+      // رأس اليوم نقّال (v2.3): النقر عليه يفتح عرض اليوم لذلك
+      // التاريخ؛ صفوف الجلسات تحته مستقلة (معالجاتها توقف الانتشار).
+      var dayWeekend = isWeekendDate(day.date);
+      html += '<div style="margin-bottom:16px"><div class="cal-range-day-head" data-cal-day-open="' + day.date + '"><strong>' +
+        UI.escapeHtml(UI.fmtDateFull(day.date)) + '</strong>' +
+        (dayWeekend ? '<span class="cal-weekend-tag">عطلة أسبوعية</span>' : '') +
+        '<span class="cal-day-open-hint">عرض هذا اليوم</span></div><div style="margin-top:6px">';
       if (holidayName) html += '<span class="m-chip m-holiday">عطلة: ' + UI.escapeHtml(holidayName) + '</span>';
       // مدخلات اليوم صفوفاً مرتبة (v2.1): عنوان + فترة وقاعة ومدرب
       // + زر «خيارات» ظاهر — بدل الشرائح المزدحمة.
@@ -754,14 +929,35 @@
         }
         var dateStr = UI.dateToStr(new Date(year, month, day));
         var isToday = dateStr === today;
-        var isWeekend = dow === 5 || dow === 6;
+        var isWeekend = isWeekendDate(dateStr);
         var sessions = Store.getAll('sessions').filter(function (s) { return s.date === dateStr && sessionMatchesFilter(s); });
         // الاجتماعات العارضة المجدولة في هذا اليوم؛ الملغاة لا تظهر.
         var meetings = Store.getAll('meetings').filter(function (m) { return m.date === dateStr && m.status !== 'cancelled' && meetingMatchesFilter(m); });
-        html += '<td class="' + (isToday ? 'today-cell' : isWeekend ? 'weekend-cell' : '') + '"' +
-          (holidays[dateStr] ? '' : ' data-cal-date="' + dateStr + '"') + '><div class="m-day">' + day + '</div>';
+        // ملخص اليوم (v2.3): عدد الجلسات غير الملغاة + الاجتماعات،
+        // ونقاط التوفر (نقطة لكل فترة: خضراء = قاعة حرة، كحلية =
+        // كل القاعات مشغولة). النقر على أي خلية يوم — بما فيها
+        // العطل وأيام العطلة الأسبوعية — يفتح عرض اليوم لذلك التاريخ.
+        var occSessions = sessions.filter(function (s) { return s.state !== 'cancelled' && s.state !== 'holiday'; });
+        var summaryParts = [];
+        if (occSessions.length) summaryParts.push(countText(occSessions.length, 'جلسة واحدة', 'جلستان', 'جلسات'));
+        if (meetings.length) summaryParts.push(countText(meetings.length, 'اجتماع واحد', 'اجتماعان', 'اجتماعات'));
+        var monthPeriods = Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+        var freeMap = holidays[dateStr] ? null : periodFreeMap(dateStr);
+        html += '<td class="' + (isToday ? 'today-cell' : isWeekend ? 'weekend-cell' : '') + '" data-cal-day-open="' + dateStr + '"><div class="m-day">' + day + '</div>';
+        if (isWeekend) html += '<div class="cal-weekend-tag">عطلة أسبوعية</div>';
         if (holidays[dateStr]) {
           html += '<span class="m-chip m-holiday">عطلة: ' + UI.escapeHtml(holidays[dateStr]) + '</span>';
+        } else {
+          if (summaryParts.length) {
+            html += '<div class="cal-month-summary">' + summaryParts.join(' · ') + '</div>';
+          } else if (!isWeekend) {
+            html += '<div class="cal-month-summary">لا جلسات</div>';
+          }
+          if (monthPeriods.length) {
+            html += '<div class="cal-month-dots">' + monthPeriods.map(function (p) {
+              return '<span class="cal-month-dot ' + (freeMap[p.id] ? 'free' : 'busy') + '" title="' + UI.escapeHtml(p.label) + '"></span>';
+            }).join('') + '</div>';
+          }
         }
         sessions.forEach(function (s) {
           var course = App.Store.get('courses', s.courseId);

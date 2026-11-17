@@ -106,7 +106,7 @@
       exportKind: 'expenses-stats',
       columns: [
         { id: 'category', label: 'الفئة', checked: true },
-        { id: 'course', label: 'الدورة', checked: true },
+        { id: 'course', label: 'مجموعة التدريب', checked: true },
         { id: 'count', label: 'عدد المصاريف', checked: true },
         { id: 'total', label: 'الإجمالي (ل.س)', checked: true }
       ]
@@ -155,7 +155,7 @@
       UI.openPicker({
         title: 'تصدير نسخة احتياطية كاملة',
         sections: [
-          { id: 'courses', label: 'الدورات والجلسات', checked: true },
+          { id: 'courses', label: 'مجموعات التدريب والجلسات', checked: true },
           { id: 'directory', label: 'الدليل (مدربون، قاعات، مديريات، متدربون)', checked: true },
           { id: 'budget', label: 'الميزانيات والمصاريف', checked: true },
           { id: 'users', label: 'المستخدمون وسجل التدقيق', checked: true }
@@ -343,7 +343,7 @@
       session_state: 'تغيير حالة جلسة', session_merge: 'دمج جلسات',
       session_merge_delete: 'حذف بعد دمج', session_split: 'تقسيم جلسة', trainer_attendance: 'حضور مدرب',
       session_postpone: 'تأجيل جلسة', session_holiday: 'جلسة عطلة', session_update: 'تعديل جلسة',
-      course_reschedule: 'تغيير تاريخ بدء دورة', course_rename: 'إعادة تسمية دورة', course_delete: 'حذف دورة',
+      course_reschedule: 'تغيير تاريخ بدء مجموعة تدريب', course_rename: 'إعادة تسمية دورة', course_delete: 'حذف مجموعة تدريب',
       attendance: 'تسجيل حضور', trainee_status: 'تغيير حالة متدرب',
       note_add: 'إضافة ملاحظة', note_delete: 'حذف ملاحظة',
       meeting_create: 'إنشاء اجتماع عارض', meeting_update: 'تعديل اجتماع عارض',
@@ -354,10 +354,10 @@
 
   function entityLabel(entity) {
     var map = {
-      courses: 'دورة', sessions: 'جلسة', trainees: 'متدرب', trainers: 'مدرب',
+      courses: 'مجموعة تدريب', sessions: 'جلسة', trainees: 'متدرب', trainers: 'مدرب',
       groups: 'مجموعة تدريبية',
       directorates: 'مديرية', halls: 'قاعة', periods: 'فترة', holidays: 'عطلة',
-      expenses: 'مصروف', budgetCategories: 'فئة ميزانية', levels: 'مستوى دورة', users: 'حساب',
+      expenses: 'مصروف', budgetCategories: 'فئة ميزانية', levels: 'مستوى مجموعة تدريب', users: 'حساب',
       notes: 'ملاحظة', audit: 'تدقيق', meta: 'إعداد', meetings: 'اجتماع عارض'
     };
     return map[entity] || entity || '';
@@ -388,18 +388,18 @@
   // - سجل التدقيق: شاشة الإدارة فقط + قاعدة Firestore (قراءة للمدير فقط).
   // - النسخ الاحتياطي: شاشة الإدارة فقط؛ لا توجد وظيفة استعادة في الكود.
   var PERMISSION_ROWS = [
-    ['عرض الشاشات والبيانات (لوحة المعلومات، الدورات، الرزنامة، الدليل)', true, true, true],
+    ['عرض الشاشات والبيانات (لوحة المعلومات، مجموعات التدريب، الرزنامة، الدليل)', true, true, true],
     ['عرض شاشتي الإدارة والإعدادات', true, false, false],
     ['إدارة المستخدمين (إنشاء، تغيير الدور، تعطيل، حذف، إعادة تعيين كلمة المرور)', true, false, false],
-    ['إضافة الدورات وتعديلها وحذفها', true, true, false],
+    ['إضافة مجموعات التدريب وتعديلها وحذفها', true, true, false],
     ['إدارة الجلسات (تأجيل، إلغاء، دمج، تقسيم، تعديل، تغيير الحالة)', true, true, false],
     ['عرض الحضور (تفقد)', true, true, true],
     ['تسجيل الحضور وتصحيحه (متدربون ومدرب)', true, true, false],
     ['إدارة الدليل (مدربون، قاعات، مديريات، مجموعات، متدربون)', true, true, false],
-    ['إدارة الفترات والعطل وفئات الميزانية ومستويات الدورات', true, false, false],
+    ['إدارة الفترات والعطل وفئات الميزانية ومستويات مجموعات التدريب', true, false, false],
     ['الاجتماعات العارضة (إنشاء، تعديل، إلغاء، حذف)', true, true, false],
-    ['تصدير Excel (ملفات الدورات، القوائم، الحضور، الرزنامة، الدليل)', true, true, true],
-    ['تصدير إحصائيات الدورات', true, true, false],
+    ['تصدير Excel (ملفات مجموعات التدريب، القوائم، الحضور، الرزنامة، الدليل)', true, true, true],
+    ['تصدير إحصائيات مجموعات التدريب', true, true, false],
     ['عرض سجل التدقيق', true, false, false],
     ['النسخ الاحتياطي وملخص المنصة', true, false, false],
     ['إضافة الملاحظات وحذفها', true, true, false]
@@ -426,8 +426,8 @@
     { key: 'today', label: 'جلسات اليوم' },
     { key: 'weekAttendance', label: 'ملخص الحضور هذا الأسبوع' },
     { key: 'upcoming', label: 'الجلسات القادمة' },
-    { key: 'progress', label: 'تقدم الدورات النشطة' },
-    { key: 'tracker', label: 'متابعة الدورات' }
+    { key: 'progress', label: 'تقدم مجموعات التدريب النشطة' },
+    { key: 'tracker', label: 'متابعة مجموعات التدريب' }
   ];
 
   // ---------- رأس قسم في شاشة الإعدادات ----------
@@ -493,10 +493,10 @@
 
     html += '</section>';
 
-    html += settingsSectionHead(3, 'المستويات', 'مستويات الدورات الافتراضية والمخصصة.');
+    html += settingsSectionHead(3, 'المستويات', 'مستويات مجموعات التدريب الافتراضية والمخصصة.');
 
     // القسم 3 — المستويات: مستويات الدورات (الافتراضية للعرض فقط + المخصصة قابلة للإدارة)
-    html += '<div class="card-white"><div class="section-title-row"><h2>مستويات الدورات</h2>' +
+    html += '<div class="card-white"><div class="section-title-row"><h2>مستويات مجموعات التدريب</h2>' +
       '<button class="btn btn-outline btn-sm" type="button" id="settings-add-level">إضافة مستوى</button>' +
       '</div>';
     Object.keys(App.LEVEL_LABELS).forEach(function (key) {
@@ -506,7 +506,7 @@
         '</div></div>';
     });
     html += '<div class="muted" style="margin:6px 0 10px">مستويات مخصصة:</div>';
-    if (!levels.length) html += '<div class="muted">لا مستويات مخصصة — أضف مستوى يظهر في نموذج الدورة.</div>';
+    if (!levels.length) html += '<div class="muted">لا مستويات مخصصة — أضف مستوى يظهر في نموذج مجموعة التدريب.</div>';
     levels.forEach(function (l) {
       html += '<div class="list-row"><div class="list-row-main">' +
         '<div class="list-row-title"><strong>' + UI.escapeHtml(l.name) + '</strong></div>' +
@@ -515,14 +515,14 @@
         '<button class="btn btn-danger btn-sm" type="button" data-settings-del-level="' + UI.escapeHtml(l.id) + '">حذف</button>' +
         '</div></div>';
     });
-    html += '<div class="muted" style="margin-top:10px">تظهر المستويات المخصصة في نموذج الدورة. لا يمكن حذف مستوى معيّن في دورة.</div></div>';
+    html += '<div class="muted" style="margin-top:10px">تظهر المستويات المخصصة في نموذج مجموعة التدريب. لا يمكن حذف مستوى معيّن في مجموعة تدريب.</div></div>';
 
     // لوحة إحصاءات المستويات (v2.1 — بند 10).
     html += '<div id="settings-levels-stats-panel"></div>';
 
     html += '</section>';
 
-    html += settingsSectionHead(4, 'الإعدادات العامة', 'العطل التي تُتخطى عند توليد الجداول، وفئات مصروفات الميزانية.');
+    html += settingsSectionHead(4, 'الإعدادات العامة', 'العطل التي تُتخطى عند توليد الجداول، وأيام العطلة الأسبوعية، وفئات مصروفات الميزانية.');
 
     // القسم 4 — الإعدادات العامة: العطل
     html += '<div class="card-white"><div class="section-title-row"><h2>العطل</h2>' +
@@ -542,6 +542,29 @@
     }
     html += '</div>';
 
+    // القسم 4 — الإعدادات العامة: العطلة الأسبوعية (v2.3 — W3).
+    // إعداد مشترك بين كل المنسقين (meta/general) — لا جلسات في
+    // هذه الأيام، وتُتخطى في التعبئة الذكية والرزنامة. تُعرض القيمة
+    // المخزنة مؤقتاً أولاً، ثم تُزامن مع المحفوظة بعد التحميل (انظر
+    // الربط أسفل renderSettings).
+    var weekendDays = [5, 6];
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.getWeekendDays === 'function') {
+        var wd = window.TadreebDB.getWeekendDays();
+        if (Array.isArray(wd) && wd.length) weekendDays = wd;
+      }
+    } catch (e) { /* الافتراضي أعلاه */ }
+    html += '<div class="card-white"><div class="section-title-row"><h2>العطلة الأسبوعية</h2>' +
+      '<button class="btn btn-outline btn-sm" type="button" id="settings-save-weekend">حفظ العطلة الأسبوعية</button>' +
+      '</div>' +
+      '<p class="muted" style="margin-top:0">أيام العطلة الأسبوعية — لا جلسات فيها، وتُتخطى في التعبئة الذكية والرزنامة. تُطبَّق على جميع المنسقين.</p>' +
+      '<div class="day-picker" id="settings-weekend-picker">' +
+      UI.WEEKDAYS.map(function (name, i) {
+        return '<label class="day-chip' + (weekendDays.indexOf(i) !== -1 ? ' checked' : '') + '"><input type="checkbox" data-weekend-day="' +
+          i + '"' + (weekendDays.indexOf(i) !== -1 ? ' checked' : '') + '> ' + name + '</label>';
+      }).join('') + '</div>' +
+      '<div class="field-hint">الافتراضي: الجمعة والسبت. يجب اختيار يوم واحد على الأقل.</div></div>';
+
     // لوحة إحصاءات العطل (v2.1 — بند 10).
     html += '<div id="settings-holidays-stats-panel"></div>';
 
@@ -558,7 +581,7 @@
         '<button class="btn btn-danger btn-sm" type="button" data-settings-del-category="' + UI.escapeHtml(c.id) + '">حذف</button>' +
         '</div></div>';
     });
-    html += '<div class="muted" style="margin-top:10px">تظهر هذه الفئات في نموذج إضافة المصروف لكل دورة.</div></div>';
+    html += '<div class="muted" style="margin-top:10px">تظهر هذه الفئات في نموذج إضافة المصروف لكل مجموعة تدريب.</div></div>';
 
     html += '</section>';
 
@@ -614,10 +637,10 @@
 
     // القسم 6 — حول المنصة
     html += '<div class="card-white"><div class="section-title-row"><h2>حول المنصة</h2></div>' +
-      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.2</p>' +
+      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.3</p>' +
       '<div class="stats" style="margin-bottom:0">' +
       '<div class="stat"><div class="stat-num" id="settings-count-users">…</div><div class="stat-label">عدد المستخدمين</div></div>' +
-      '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('courses').length) + '</div><div class="stat-label">عدد الدورات</div></div>' +
+      '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('courses').length) + '</div><div class="stat-label">عدد مجموعات التدريب</div></div>' +
       '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('trainees').length) + '</div><div class="stat-label">عدد المتدربين</div></div>' +
       '</div></div>';
 
@@ -654,7 +677,7 @@
       exportKind: 'levels-stats',
       columns: [
         { id: 'level', label: 'المستوى', checked: true },
-        { id: 'courses', label: 'عدد الدورات', checked: true },
+        { id: 'courses', label: 'عدد مجموعات التدريب', checked: true },
         { id: 'sessions', label: 'عدد الجلسات', checked: true },
         { id: 'trainees', label: 'عدد المتدربين', checked: true }
       ]
@@ -680,6 +703,45 @@
     document.getElementById('settings-add-category').addEventListener('click', function () { settingsAddCategory(); });
     document.getElementById('settings-add-level').addEventListener('click', function () { settingsAddLevel(); });
     document.getElementById('settings-add-user').addEventListener('click', function () { openAddUserModal(); });
+
+    // العطلة الأسبوعية (v2.3 — W3): تبديل مظهر الشريحة عند النقر،
+    // ومزامنة المربعات مع القيمة المحفوظة بعد التحميل، ثم الحفظ.
+    var weekendPicker = document.getElementById('settings-weekend-picker');
+    if (weekendPicker) {
+      weekendPicker.addEventListener('change', function (e) {
+        var cb = e.target && e.target.closest ? e.target.closest('[data-weekend-day]') : null;
+        if (cb) {
+          var lbl = cb.closest('label');
+          if (lbl) lbl.classList.toggle('checked', cb.checked);
+        }
+      });
+      if (window.TadreebDB && typeof window.TadreebDB.loadWeekendDays === 'function') {
+        window.TadreebDB.loadWeekendDays().then(function (days) {
+          weekendPicker.querySelectorAll('[data-weekend-day]').forEach(function (cb) {
+            var on = days.indexOf(parseInt(cb.getAttribute('data-weekend-day'), 10)) !== -1;
+            cb.checked = on;
+            var lbl2 = cb.closest('label');
+            if (lbl2) lbl2.classList.toggle('checked', on);
+          });
+        }).catch(function () { /* تبقى القيم المعروضة */ });
+      }
+    }
+    var weekendSaveBtn = document.getElementById('settings-save-weekend');
+    if (weekendSaveBtn) weekendSaveBtn.addEventListener('click', function () {
+      var days = [];
+      container.querySelectorAll('[data-weekend-day]:checked').forEach(function (cb) {
+        days.push(parseInt(cb.getAttribute('data-weekend-day'), 10));
+      });
+      if (!days.length) { UI.toast('اختر يوماً واحداً على الأقل للعطلة الأسبوعية', 'error'); return; }
+      UI.setBtnLoading(weekendSaveBtn, true, 'جارٍ الحفظ…');
+      window.TadreebDB.setWeekendDays(days).then(function () {
+        UI.setBtnLoading(weekendSaveBtn, false);
+        UI.toast('تم حفظ أيام العطلة الأسبوعية', 'success');
+      }).catch(function (err) {
+        UI.setBtnLoading(weekendSaveBtn, false);
+        UI.toastError(err);
+      });
+    });
 
     // إدارة العرض
     var calViewSel = document.getElementById('settings-calendar-view');
@@ -911,7 +973,7 @@
     var warning = '';
     if (type === 'period') {
       var pCount = App.Store.getAll('courses').filter(function (c) { return c.periodId === id; }).length;
-      if (pCount) warning = ' هذه الفترة مستخدمة في ' + pCount + ' دورة — ستظهر تلك الدورات بلا فترة.';
+      if (pCount) warning = ' هذه الفترة مستخدمة في ' + pCount + ' مجموعة تدريب — ستظهر مجموعات التدريب تلك بلا فترة.';
     }
     UI.confirmDialog('حذف ' + meta.label, 'هل أنت متأكد من حذف «' + label + '»؟ لا يمكن التراجع.' + warning,
       function () {
@@ -1025,7 +1087,7 @@
   }
 
   function settingsAddLevel() {
-    UI.openFormModal('إضافة مستوى دورة',
+    UI.openFormModal('إضافة مستوى مجموعة تدريب',
       '<div class="field"><label>اسم المستوى *</label><input type="text" name="name" required placeholder="مثال: مستوى احترافي"></div>',
       function (form, close, submitBtn) {
         var name = form.querySelector('[name="name"]').value.trim();
@@ -1045,7 +1107,7 @@
   function settingsEditLevel(id) {
     var level = App.Store.get('levels', id);
     if (!level) return;
-    UI.openFormModal('تعديل مستوى دورة',
+    UI.openFormModal('تعديل مستوى مجموعة تدريب',
       '<div class="field"><label>اسم المستوى *</label><input type="text" name="name" required value="' + UI.escapeHtml(level.name || '') + '"></div>',
       function (form, close, submitBtn) {
         var name = form.querySelector('[name="name"]').value.trim();
@@ -1067,7 +1129,7 @@
     if (!level) return;
     var used = App.Store.getAll('courses').filter(function (c) { return c.level === id; }).length;
     if (used) {
-      UI.toast('لا يمكن حذف هذا المستوى — معيّن في ' + used + ' دورة', 'error');
+      UI.toast('لا يمكن حذف هذا المستوى — معيّن في ' + used + ' مجموعة تدريب', 'error');
       return;
     }
     UI.confirmDialog('حذف المستوى', 'هل أنت متأكد من حذف مستوى «' + level.name + '»؟ لا يمكن التراجع.',
