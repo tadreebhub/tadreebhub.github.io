@@ -18,6 +18,10 @@ rules_version = '2';
 // تكون بحذف meta/setup + المستخدم الدخيل من وحدة تحكم Firebase.
 // الأدوار: admin (مدير) / editor (محرر) / viewer (عارض). العارض
 // يقرأ فقط ولا يكتب أبداً. سجل التدقيق: إنشاء فقط، ولا يُعدَّل أو يُحذف.
+// قراءة البيانات تتطلب ملفاً شخصياً موجوداً وغير معطّل (hasProfile)
+// لا مجرد تسجيل دخول — فحساب حُذف ملفه أو عُطّل لا يقرأ شيئاً.
+// قفل الحساب: مجموعة loginAttempts (بصمة + طابع زمني فقط) — قراءة
+// عامة وإنشاء مقيّد بالأنواع، لأن فحص القفل يحدث قبل تسجيل الدخول.
 // ============================================================
 
 service cloud.firestore {
@@ -47,6 +51,15 @@ service cloud.firestore {
 
     function canWrite() {
       return isAdmin() || isEditor();
+    }
+
+    // ملف شخصي موجود وغير معطّل — شرط القراءة في كل مجموعات
+    // البيانات: حساب حُذف ملفه أو عُطّل لا يقرأ شيئاً عبر واجهة
+    // Firestore المباشرة حتى لو بقي رمز الدخول (token) صالحاً
+    // (حساب Auth نفسه يبقى في وحدة التحكم حتى يحذفه المدير يدوياً).
+    function hasProfile() {
+      return profileExists() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.disabled != true;
     }
 
     function setupComplete() {
@@ -90,73 +103,112 @@ service cloud.firestore {
     // ---------- بيانات المنصة ----------
     // القراءة لأي مسجّل دخول (كل الأدوار)؛ الكتابة للمدير والمحرر فقط.
     match /courses/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /sessions/{sessionId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
 
       // حضور الجلسة (مجموعة فرعية).
       match /attendance/{traineeId} {
-        allow read: if isSignedIn();
+        allow read: if hasProfile();
         allow create, update, delete: if canWrite();
       }
     }
 
+    match /meetings/{docId} {
+      allow read: if hasProfile();
+      allow create, update, delete: if canWrite();
+    }
+
     match /trainees/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /trainers/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /directorates/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /groups/{docId} {
+      allow read: if hasProfile();
+      allow create, update, delete: if canWrite();
+    }
+
+    match /levels/{docId} {
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /halls/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /periods/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /holidays/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /expenses/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     match /budgetCategories/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     // ---------- الملاحظات (Badr 17:36: ملاحظة على أي شيء) ----------
     match /notes/{docId} {
-      allow read: if isSignedIn();
+      allow read: if hasProfile();
       allow create, update, delete: if canWrite();
     }
 
     // ---------- سجل التدقيق ----------
-    // الإنشاء لأي مسجّل دخول؛ القراءة للمدير فقط؛ لا تعديل ولا حذف أبداً.
+    // الإنشاء لأي مسجّل دخول بملف شخصي نشط؛ القراءة للمدير فقط؛
+    // لا تعديل ولا حذف أبداً.
     match /audit/{docId} {
-      allow create: if isSignedIn();
+      allow create: if hasProfile();
       allow read: if isAdmin();
       allow update, delete: if false;
+    }
+
+    // ---------- محاولات الدخول (قفل الحساب) ----------
+    // المستندات تحوي بصمة SHA-256 لاسم المستخدم + طابعاً زمنياً فقط
+    // (أو علامة قفل locked: true) — بلا أسماء مستخدمين ولا كلمات
+    // مرور ولا أي بيانات شخصية. القراءة عامة لأن فحص القفل يحدث
+    // قبل تسجيل الدخول (بلا مصادقة)؛ الإنشاء مقيّد بالمفاتيح
+    // والأنواع تماماً؛ التعديل والحذف للمدير فقط (تنظيف).
+    // تنبيه: البصمة غير مملّحة — من يعرف اسم مستخدم يستطيع حساب
+    // بصمته وكتابة محاولات مزيّفة لقفل الحساب 15 دقيقة (إزعاج
+    // محدود المدة، لا اختراق). تُنظَّف المستندات القديمة يدوياً
+    // من وحدة التحكم (لا تنظيف تلقائي في العميل).
+    match /loginAttempts/{docId} {
+      allow read: if true;
+      allow create: if (request.resource.data.keys().hasOnly(['u', 'at'])
+          && request.resource.data.u is string
+          && request.resource.data.at is timestamp)
+        || (request.resource.data.keys().hasOnly(['u', 'at', 'locked'])
+          && request.resource.data.u is string
+          && request.resource.data.at is timestamp
+          && request.resource.data.locked is bool
+          && request.resource.data.locked == true);
+      allow update, delete: if isAdmin();
     }
 
     // ---------- رفض افتراضي لكل ما عداه ----------
