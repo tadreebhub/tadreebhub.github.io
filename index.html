@@ -24,7 +24,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-wordmark">تدريب</div>
-      <div class="login-tag">إدارة الدورات التدريبية</div>
+      <div class="login-tag">إدارة مجموعات التدريب</div>
       <div class="loading-state"><span class="spinner"></span><div style="margin-top:14px">جارٍ التحميل…</div></div>
     </div>
   </div>
@@ -49,7 +49,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-wordmark">تدريب</div>
-      <div class="login-tag">إدارة الدورات التدريبية</div>
+      <div class="login-tag">إدارة مجموعات التدريب</div>
       <div class="form-error" id="login-error"></div>
       <form id="login-form" novalidate>
         <div class="field">
@@ -113,10 +113,11 @@
         <div class="nav-group">
           <div class="nav-group-label">الرئيسية</div>
           <button class="nav-link" type="button" data-screen="dashboard">لوحة المعلومات</button>
+          <button class="nav-link" type="button" data-screen="notifications">التنبيهات</button>
         </div>
         <div class="nav-group">
-          <div class="nav-group-label">الدورات والجلسات</div>
-          <button class="nav-link" type="button" data-screen="courses">الدورات</button>
+          <div class="nav-group-label">مجموعات التدريب والجلسات</div>
+          <button class="nav-link" type="button" data-screen="courses">مجموعات التدريب</button>
           <button class="nav-link" type="button" data-screen="calendar">رزنامة القاعات</button>
         </div>
         <div class="nav-group">
@@ -135,7 +136,7 @@
       <div id="screen-container"></div>
     </main>
   </div>
-  <footer class="app-footer">تدريب · نظام إدارة الدورات التدريبية · للاستخدام الداخلي فقط</footer>
+  <footer class="app-footer">تدريب · نظام إدارة مجموعات التدريب · للاستخدام الداخلي فقط</footer>
 </div>
 
 <!-- ============ قفل الشاشة ============ -->
@@ -180,6 +181,7 @@
 <script src="js/screens-directory.js"></script>
 <script src="js/screens-admin.js"></script>
 <script src="js/screens-session.js"></script>
+<script src="js/screens-notifications.js"></script>
 <script src="js/sw-register.js"></script>
 </body>
 </html>
