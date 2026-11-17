@@ -1,7 +1,7 @@
 // notes.js — ملاحظات حرة على أي شيء في منصة تدريب (Badr 17:36).
 // مجموعة notes: { entityType, entityId, text, authorId, authorName, ts, tsMs }
 // entityType: course | session | trainee | trainer | hall | attendance | expense
-//             | directorate | period | holiday
+//             | directorate | period | holiday | group
 // entityId: معرّف السجل؛ لسجل الحضور يكون "sessionId:traineeId".
 // الفرز يتم على العميل (tsMs) لتجنّب الحاجة إلى فهرس مركّب في Firestore.
 (function () {
@@ -17,7 +17,8 @@
     expense: 'بند المصاريف',
     directorate: 'المديرية',
     period: 'الفترة التدريبية',
-    holiday: 'يوم العطلة'
+    holiday: 'يوم العطلة',
+    group: 'المجموعة التدريبية'
   };
 
   function db() {
