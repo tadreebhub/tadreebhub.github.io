@@ -5,7 +5,7 @@
 // ملاحظة لوكيل الشاشات: القائمة أدناه تتضمن index.html و css/* التي
 // ستُضاف لاحقاً — حافظ على أسماء الملفات هذه ثابتة. التثبيت متسامح:
 // ملف غائب لا يُفشل التثبيت، لكنه لن يعمل دون اتصال حتى يُضاف.
-var CACHE_NAME = 'tadreeb-v1.1';
+var CACHE_NAME = 'tadreeb-v1.1.1';
 
 var SHELL_FILES = [
   './',
@@ -27,6 +27,7 @@ var SHELL_FILES = [
   './js/screens-directory.js',
   './js/screens-admin.js',
   './js/screens-session.js',
+  './js/sw-register.js',
   './vendor/firebase-app-compat.js',
   './vendor/firebase-auth-compat.js',
   './vendor/firebase-firestore-compat.js',
