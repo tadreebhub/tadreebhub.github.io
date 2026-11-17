@@ -76,6 +76,27 @@
     return '<span class="ltr">' + escapeHtml(start) + ' - ' + escapeHtml(end) + '</span>';
   }
 
+  // مدة الفترة بالعربية من وقتي "HH:MM": 60 ← «ساعة واحدة»، 120 ←
+  // «ساعتان»، 3–10 ساعات ← «N ساعات»، 11+ ← «N ساعة»، دون الساعة ←
+  // «N دقيقة»، مختلط ← «ساعة و30 دقيقة». نهاية ≤ بداية ← ''.
+  function fmtDuration(start, end) {
+    function mins(t) {
+      var p = String(t || '').split(':');
+      return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+    }
+    var diff = mins(end) - mins(start);
+    if (!isFinite(diff) || diff <= 0) return '';
+    var hours = Math.floor(diff / 60);
+    var minutes = diff % 60;
+    var parts = [];
+    if (hours === 1) parts.push(minutes > 0 ? 'ساعة' : 'ساعة واحدة');
+    else if (hours === 2) parts.push('ساعتان');
+    else if (hours >= 3 && hours <= 10) parts.push(hours + ' ساعات');
+    else if (hours >= 11) parts.push(hours + ' ساعة');
+    if (minutes > 0) parts.push(minutes + ' دقيقة');
+    return parts.join(' و');
+  }
+
   // طابع زمني (Timestamp من Firestore أو رقم أو Date) → "17 تشرين الثاني 2026، 09:30"
   function fmtTimestamp(ts) {
     if (ts == null) return '';
@@ -263,12 +284,14 @@
   }
 
   // نافذة نموذج: openFormModal(title, fieldsHTML, onSubmit(formEl, close, submitBtn), opts)
+  // opts.onClose اختياري: يُستدعى عند إغلاق النافذة بأي طريقة.
   function openFormModal(title, fieldsHTML, onSubmit, opts) {
     opts = opts || {};
     var m = openModal({
       title: title,
       width: opts.width || 'wide',
       bodyHTML: '<form novalidate>' + fieldsHTML + '<div class="form-error"></div></form>',
+      onClose: opts.onClose,
       actions: [
         {
           label: opts.submitLabel || 'حفظ',
@@ -290,6 +313,39 @@
       });
     }
     return m;
+  }
+
+  // تأكيد الهوية قبل إجراء مدمّر: نافذة تطلب كلمة مرور المستخدم
+  // الحالي وتتحقق منها (تطبيق Firebase ثانوي مؤقت — لا تسجيل خروج).
+  // requireReauth(onConfirmed, onCancelled) — onConfirmed تُستدعى بعد
+  // التحقق الناجح فقط؛ onCancelled عند إغلاق النافذة دون تأكيد
+  // (إلغاء/✕/Escape). كلمة مرور خاطئة تُظهر خطأ وتُبقي النافذة مفتوحة.
+  function requireReauth(onConfirmed, onCancelled) {
+    var confirmed = false;
+    openFormModal('تأكيد الهوية',
+      '<div class="field"><label>كلمة المرور *</label><input type="password" name="password" required autocomplete="current-password"></div>' +
+      '<div class="muted">أدخل كلمة مرورك لتأكيد هذا الإجراء</div>',
+      function (form, close, submitBtn) {
+        var password = form.querySelector('[name="password"]').value;
+        if (!password) { formError(form, 'أدخل كلمة المرور'); return; }
+        formError(form, '');
+        setBtnLoading(submitBtn, true);
+        window.TadreebAuth.reauthenticate(password).then(function () {
+          confirmed = true;
+          setBtnLoading(submitBtn, false);
+          close();
+          if (typeof onConfirmed === 'function') onConfirmed();
+        }).catch(function (err) {
+          setBtnLoading(submitBtn, false);
+          formError(form, err && err.message ? err.message : 'تعذّر التأكيد');
+        });
+      }, {
+        submitLabel: 'تأكيد',
+        width: 'normal',
+        onClose: function () {
+          if (!confirmed && typeof onCancelled === 'function') onCancelled();
+        }
+      });
   }
 
   function formError(form, msg) {
@@ -326,9 +382,9 @@
   }
 
   // ---------- شارات الحالات ----------
-  var COURSE_STATUS_LABELS = { active: 'نشطة', completed: 'مكتملة', cancelled: 'ملغاة' };
+  var COURSE_STATUS_LABELS = { active: 'نشطة', completed: 'مكتملة', cancelled: 'ملغاة', paused: 'متوقفة' };
   var SESSION_STATE_LABELS = {
-    scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب'
+    scheduled: 'مجدولة', done: 'مكتملة', cancelled: 'ملغاة', 'trainer-absent': 'غياب المدرب', holiday: 'عطلة'
   };
   var ATTENDANCE_LABELS = { present: 'موجود', absent: 'غائب', excused: 'معتذر' };
   var TRAINEE_STATUS_LABELS = {
@@ -337,13 +393,13 @@
   var ROLE_LABELS = { admin: 'مدير', editor: 'محرر', viewer: 'عارض' };
 
   function pillForCourseStatus(status) {
-    var cls = status === 'completed' ? 'pill-green' : status === 'cancelled' ? 'pill-grey' : 'pill-navy';
+    var cls = status === 'completed' ? 'pill-green' : status === 'cancelled' ? 'pill-grey' : status === 'paused' ? 'pill-amber' : 'pill-navy';
     return '<span class="pill ' + cls + '">' + escapeHtml(COURSE_STATUS_LABELS[status] || status || '') + '</span>';
   }
 
   function pillForSessionState(state) {
     var cls = state === 'done' ? 'pill-green' : state === 'cancelled' ? 'pill-red' :
-      state === 'trainer-absent' ? 'pill-amber' : 'pill-navy';
+      (state === 'trainer-absent' || state === 'holiday') ? 'pill-amber' : 'pill-navy';
     return '<span class="pill ' + cls + '">' + escapeHtml(SESSION_STATE_LABELS[state] || state || '') + '</span>';
   }
 
@@ -449,6 +505,52 @@
     };
   }
 
+  // ---------- إعدادات العرض والتنسيق (محلية لكل جهاز) ----------
+  // تُحفظ كل الإعدادات في مفتاح واحد من localStorage بصيغة JSON،
+  // ومغلّفة بـ try/catch حتى لا يكسر مخزن تالف إقلاع التطبيق أبداً.
+  var SETTINGS_KEY = 'tadreeb-settings';
+  var SETTING_DEFAULTS = {
+    calendarView: 'week',
+    dashboardCards: { stats: true, today: true, weekAttendance: true, upcoming: true, progress: true, tracker: true },
+    tableDensity: 'comfortable',
+    exportFmt: { dateFormat: 'iso', numbers: 'western', thousands: true, title: true }
+  };
+
+  function readSettingsStore() {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return {};
+      var raw = window.localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return {};
+      var parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) { return {}; }
+  }
+
+  function getSetting(key, fallback) {
+    var store = readSettingsStore();
+    var def = (fallback !== undefined) ? fallback : SETTING_DEFAULTS[key];
+    if (!Object.prototype.hasOwnProperty.call(store, key)) return def;
+    var val = store[key];
+    // دمج الكائنات فوق الافتراضي حتى يبقى مخزن جزئي مكتملاً دائماً.
+    if (val && typeof val === 'object' && !Array.isArray(val) &&
+        def && typeof def === 'object' && !Array.isArray(def)) {
+      var merged = {};
+      Object.keys(def).forEach(function (k) { merged[k] = def[k]; });
+      Object.keys(val).forEach(function (k) { merged[k] = val[k]; });
+      return merged;
+    }
+    return val;
+  }
+
+  function setSetting(key, value) {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      var store = readSettingsStore();
+      store[key] = value;
+      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(store));
+    } catch (e) { /* التخزين غير متاح — يُتجاهل دون كسر أي شيء */ }
+  }
+
   // ---------- تصدير دفاعي ----------
   function hasExport(fnName) {
     return !!(window.TadreebExport && typeof window.TadreebExport[fnName] === 'function');
@@ -460,6 +562,14 @@
       return null;
     }
     try {
+      args = args || [];
+      // دمج تفضيلات تنسيق التصدير في وسيط البيانات (للكائنات فقط؛
+      // المصفوفات يقرأ محرك التصدير تفضيلاتها من UI مباشرة).
+      try {
+        if (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) && !args[0].fmt) {
+          args[0].fmt = getSetting('exportFmt', SETTING_DEFAULTS.exportFmt);
+        }
+      } catch (e) { /* تفضيلات التنسيق اختيارية تماماً */ }
       var result = window.TadreebExport[fnName].apply(window.TadreebExport, args || []);
       if (result && typeof result.then === 'function') {
         return result.then(function (filename) {
@@ -499,6 +609,7 @@
     fmtMonthYear: fmtMonthYear,
     fmtWeekday: fmtWeekday,
     fmtTimeRange: fmtTimeRange,
+    fmtDuration: fmtDuration,
     fmtTimestamp: fmtTimestamp,
     tsMillis: tsMillis,
     fmtNumber: fmtNumber,
@@ -512,6 +623,7 @@
     closeAllModals: closeAllModals,
     confirmDialog: confirmDialog,
     openFormModal: openFormModal,
+    requireReauth: requireReauth,
     formError: formError,
     setBtnLoading: setBtnLoading,
     emptyState: emptyState,
@@ -530,6 +642,9 @@
     notesWidget: notesWidget,
     hasExport: hasExport,
     callExport: callExport,
-    openPicker: openPicker
+    openPicker: openPicker,
+    SETTING_DEFAULTS: SETTING_DEFAULTS,
+    getSetting: getSetting,
+    setSetting: setSetting
   };
 })();
