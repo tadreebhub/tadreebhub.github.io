@@ -218,6 +218,10 @@ tbody tr.selected-row{background:#EAF3F8}
 .toast{background:var(--navy);color:#fff;border-radius:10px;padding:13px 22px;font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.3);max-width:520px;text-align:center;pointer-events:auto}
 .toast.error{background:var(--red)}
 .toast.success{background:var(--green)}
+.toast.warning{background:#B45309}
+
+/* عناوين أقسام النموذج (v2.3.1 — إعادة ترتيب نموذج المجموعة) */
+.form-section-title{margin:4px 0 2px;font-size:15px;font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold);padding-bottom:6px}
 
 /* قفل الشاشة */
 .lock-overlay{position:fixed;inset:0;background:linear-gradient(160deg,#081F31 0%,#0B2A42 60%,#123A56 100%);z-index:300;display:flex;align-items:center;justify-content:center;padding:24px;overflow-x:hidden;overflow-x:clip}
@@ -610,3 +614,5 @@ th,td{padding:10px 12px}
    longest option, which overflowed 390px screens by ~41px. Cap toolbar selects at the
    container width (the dropdown still shows full option text when opened). */
 .toolbar select.input{min-width:0;max-width:100%}
+/* v2.3.1: سطر المعرّف الثانوي تحت الاسم الرئيسي (قوائم المجموعات + ترويسة التفاصيل) */
+.group-code-line{font-size:12px;color:var(--muted);margin-top:2px}
