@@ -144,6 +144,14 @@ service cloud.firestore {
       allow create, update, delete: if canWrite();
     }
 
+    // دليل الدورات (v2.3.1 — مجموعة جديدة courseNames): أسماء
+    // المناهج التي تُبنى عليها مجموعات التدريب — نفس نمط بيانات
+    // الدليل (قراءة لأي ملف شخصي، كتابة للمدير/المحرر).
+    match /courseNames/{docId} {
+      allow read: if hasProfile();
+      allow create, update, delete: if canWrite();
+    }
+
     match /directorates/{docId} {
       allow read: if hasProfile();
       allow create, update, delete: if canWrite();
