@@ -40,14 +40,28 @@
     try { return A.Store.get(collection, id) || null; } catch (e) { return null; }
   }
 
-  // الاسم المعروض لمجموعة التدريب (المخصص أو التلقائي) — عبر App
-  // عند توفره، وإلا اسم الدورة (المنهج).
+  // الاسم المعروض لمجموعة التدريب — الصيغة الكاملة مع المعرّف
+  // (صفوف الإحصائيات تُصدَّر نصياً) عبر App عند توفره، وإلا
+  // اسم الدورة (المنهج).
+  // اسم الدورة (المنهج) — يُحلُّ من دليل الدورات عبر App عند
+  // توفره (v2.3.1)، وإلا الاسم المخزَّن على المستند.
+  function resolvedCourseName(course) {
+    var A = app();
+    if (course && A && typeof A.courseName === 'function') {
+      try { return A.courseName(course) || ''; } catch (e) { /* احتياطي أدناه */ }
+    }
+    return (course && course.name) || '';
+  }
+
   function groupDisplayName(course) {
     var A = app();
+    if (course && A && typeof A.groupDisplayNameFull === 'function') {
+      try { return A.groupDisplayNameFull(course); } catch (e) { /* احتياطي أدناه */ }
+    }
     if (course && A && typeof A.groupDisplayName === 'function') {
       try { return A.groupDisplayName(course); } catch (e) { /* احتياطي أدناه */ }
     }
-    return (course && course.name) || '';
+    return resolvedCourseName(course);
   }
 
   function db() {
@@ -393,6 +407,9 @@
   /* ---------- تنسيق قيمة مقياس للعرض ---------- */
   function fmtValue(section, id, value) {
     if (value == null || value === '') return '—';
+    // قيمة نصية جاهزة (كـ «بدون ميزانية») تُعرض كما هي مهما كان
+    // تنسيق المقياس — v2.3.1 الميزانية الاختيارية.
+    if (typeof value === 'string') return value;
     var def = defFor(section, id);
     var format = def ? def.format : 'num';
     var U = ui();
@@ -460,8 +477,10 @@
       byCat[e.category] = (byCat[e.category] || 0) + a;
     });
     var allocated = course ? asNum(course.budget) : 0;
+    var hasBudget = !!(course && course.budget != null && course.budget !== '');
     return {
-      allocated: allocated, totalSpent: total, remaining: allocated - total,
+      hasBudget: hasBudget,
+      allocated: hasBudget ? allocated : 0, totalSpent: total, remaining: allocated - total,
       byCategory: byCat, expenses: expenses, trainerFeeDue: 0,
       trainerFeeAlreadyRecorded: !!byCat['أجور المدربين']
     };
@@ -534,8 +553,14 @@
     var courses = storeAll('courses');
     var sessions = storeAll('sessions');
     var active = courses.filter(function (c) { return c.status === 'active'; });
-    var totalBudget = 0, totalSpent = 0;
-    courses.forEach(function (c) { totalBudget += asNum(c.budget); });
+    var totalBudget = 0, totalSpent = 0, budgetRemaining = 0;
+    courses.forEach(function (c) {
+      totalBudget += asNum(c.budget);
+      // v2.3.1: المتبقي يُجمع من المجموعات ذات الميزانية فقط.
+      if (c.budget != null && c.budget !== '') {
+        budgetRemaining += asNum(c.budget) - budgetFor(c.id).totalSpent;
+      }
+    });
     storeAll('expenses').forEach(function (e) { totalSpent += asNum(e.amount); });
     return {
       metrics: {
@@ -549,7 +574,7 @@
         upcomingSessions: sessions.filter(function (s) { return s.date > today && s.state !== 'cancelled' && s.state !== 'holiday'; }).length,
         totalBudget: totalBudget,
         totalSpent: totalSpent,
-        budgetRemaining: totalBudget - totalSpent
+        budgetRemaining: budgetRemaining
       },
       courses: courses, sessions: sessions, activeCoursesList: active
     };
@@ -576,7 +601,8 @@
       var b = budgetFor(c.id);
       budgetTotal += asNum(c.budget);
       spentTotal += b.totalSpent;
-      remainingTotal += b.remaining;
+      // v2.3.1: المتبقي يُجمع من المجموعات ذات الميزانية فقط.
+      if (b.hasBudget) remainingTotal += b.remaining;
     });
     return {
       metrics: {
@@ -658,10 +684,10 @@
         pct: prog.pct,
         trainees: trainees,
         attendanceRate: null, // غير متزامن — انظر courseAttendance
-        budget: b.allocated,
+        budget: b.hasBudget ? b.allocated : 'بدون ميزانية',
         spent: b.totalSpent,
-        budgetRemaining: b.remaining,
-        spentPct: pct(b.totalSpent, b.allocated),
+        budgetRemaining: b.hasBudget ? b.remaining : 'بدون ميزانية',
+        spentPct: b.hasBudget ? pct(b.totalSpent, b.allocated) : 'بدون ميزانية',
         hallsUsed: Object.keys(halls).length,
         feeDue: course ? trainerFeeFor(course) : 0
       },
@@ -1198,10 +1224,10 @@
     });
     return {
       metrics: {
-        allocated: b.allocated,
+        allocated: b.hasBudget ? b.allocated : 'بدون ميزانية',
         spent: b.totalSpent,
-        remaining: b.remaining,
-        spentPct: pct(b.totalSpent, b.allocated),
+        remaining: b.hasBudget ? b.remaining : 'بدون ميزانية',
+        spentPct: b.hasBudget ? pct(b.totalSpent, b.allocated) : 'بدون ميزانية',
         expensesCount: (b.expenses || []).length,
         feeDue: asNum(b.trainerFeeDue),
         feeRecorded: asNum((b.byCategory || {})['أجور المدربين']),
@@ -1541,7 +1567,7 @@
             if (U && U.SESSION_STATE_LABELS) state = U.SESSION_STATE_LABELS[s.state] || s.state;
             return {
               date: s.date || '', period: period ? period.label : '',
-              course: course ? course.name : '',
+              course: course ? resolvedCourseName(course) : '',
               trainer: course && A && typeof A.trainerName === 'function' ? A.trainerName(course.trainerId) : '',
               state: state
             };
@@ -1807,7 +1833,7 @@
       }
       case 'courses': {
         var courseRows = storeAll('courses').map(function (c) {
-          return { name: c.name || '', sessions: sessionsForCourse(c.id).filter(occupies).length };
+          return { name: resolvedCourseName(c), sessions: sessionsForCourse(c.id).filter(occupies).length };
         });
         return [
           { kind: 'bar', title: 'الجلسات لكل مجموعة تدريب', items: topItems(courseRows, 'name', 'sessions', 6), format: 'num', unit: 'جلسة' },
@@ -1889,6 +1915,8 @@
         ];
       }
       case 'budget':
+        // v2.3.1: بلا ميزانية لا معنى لمخطط المصروف/المتبقي.
+        if (typeof metrics.allocated === 'string') return [];
         return [{ kind: 'donut', title: 'الميزانية: المصروف مقابل المتبقي', format: 'money', items: [
           { label: 'المصروف', value: m('spent'), color: '#1B4F72' },
           { label: 'المتبقي', value: Math.max(0, m('remaining')), color: '#C9A86A' }
@@ -1928,7 +1956,10 @@
       var y = 4 + i * CHART_BAR_ROW;
       var color = it.color || CHART_PALETTE[i % CHART_PALETTE.length];
       var label = String(it.label || '');
-      var shortLabel = label.length > 13 ? label.slice(0, 12) + '…' : label;
+      // v2.3.1: حد الاقتطاع 18 حرفاً بدل 13 — أسماء المجموعات
+      // («مجموعة تدريب 2 — …») كانت تُقتطع إلى حدود غير مقروءة؛
+      // الاسم الكامل في <title> و aria-label كما قبل.
+      var shortLabel = label.length > 18 ? label.slice(0, 17) + '…' : label;
       var valText = fmtChartValueShort(cfg.format || 'num', v);
       var fullText = fmtChartValue(cfg.format || 'num', v);
       // القيمة داخل العمود إن اتسع، وإلا خارجه يساراً.

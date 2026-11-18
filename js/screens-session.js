@@ -44,6 +44,21 @@
     return App.displayCode(h, 'halls') + ' — ' + h.name + ' (' + hallTypeLabel(hallTypeOf(h)) + ')';
   }
 
+  // نوع القاعة المطلوب لجلسة عند إعادة جدولتها (v2.3.1): لدورة
+  // مختلطة يُشتق من ترتيب الجلسة في دورتها (الأولى إدارية ثم
+  // التقنية — App.sessionTypeOf) لا من قاعتها الحالية؛ لغير
+  // المختلطة نوع القاعة الحالية كما قبل (بلا قاعة حالية: أي نوع).
+  function sessionWantHallType(session) {
+    var course = session && session.courseId ? App.Store.get('courses', session.courseId) : null;
+    if (course && window.TadreebDB && typeof window.TadreebDB.courseTypeOf === 'function' &&
+        window.TadreebDB.courseTypeOf(course) === 'mixed' &&
+        typeof App.sessionTypeOf === 'function') {
+      return App.sessionTypeOf(session) === 'technical' ? 'computer' : 'admin';
+    }
+    var currentHall = session && session.hallId ? App.Store.get('halls', session.hallId) : null;
+    return currentHall ? hallTypeOf(currentHall) : null;
+  }
+
   // أيام العطلة الأسبوعية: من الإعدادات عبر
   // TadreebDB.getWeekendDays() إن وُجدت، وإلا الجمعة + السبت.
   function weekendDays() {
@@ -93,7 +108,7 @@
       if (s.date !== dateStr || s.periodId !== periodId) return;
       if (!s.hallId || s.state === 'cancelled' || s.state === 'holiday') return;
       var c = App.Store.get('courses', s.courseId);
-      busy[s.hallId] = c ? c.name : 'جلسة تدريبية';
+      busy[s.hallId] = c ? App.courseName(c) : 'جلسة تدريبية';
     });
     App.Store.getAll('meetings').forEach(function (m) {
       if (m.date !== dateStr || m.periodId !== periodId) return;
@@ -131,8 +146,7 @@
       if (b.id === session.periodId) return 1;
       return (a.order || 0) - (b.order || 0);
     });
-    var currentHall = session.hallId ? App.Store.get('halls', session.hallId) : null;
-    var wantType = currentHall ? hallTypeOf(currentHall) : null;
+    var wantType = sessionWantHallType(session);
     var holidays = {};
     App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
     var wd = weekendDays();
@@ -518,7 +532,7 @@
       bodyHTML:
         '<div class="meta-grid">' +
         '<div class="meta-box"><div class="k">الجلسة</div><div class="v">' + UI.escapeHtml(App.sessionLabel(session, course)) + '</div></div>' +
-        '<div class="meta-box"><div class="k">الدورة</div><div class="v">' + UI.escapeHtml(course ? course.name : '') + '</div></div>' +
+        '<div class="meta-box"><div class="k">الدورة</div><div class="v">' + UI.escapeHtml(course ? App.courseName(course) : '') + '</div></div>' +
         '<div class="meta-box"><div class="k">التاريخ</div><div class="v">' + UI.escapeHtml(UI.fmtDateFull(session.date)) + '</div></div>' +
         '<div class="meta-box"><div class="k">الفترة</div><div class="v">' + UI.escapeHtml(period ? period.label : '') + ' ' + (period ? UI.fmtTimeRange(period.start, period.end) : '') + '</div></div>' +
         '<div class="meta-box"><div class="k">القاعة</div><div class="v">' + UI.escapeHtml(App.hallName(session.hallId) || 'بلا قاعة') + '</div></div>' +
@@ -668,8 +682,7 @@
   function openPostponeModal(sessionId) {
     var session = App.Store.get('sessions', sessionId);
     if (!session) { UI.toast('الجلسة غير موجودة', 'error'); return; }
-    var currentHall = session.hallId ? App.Store.get('halls', session.hallId) : null;
-    var wantType = currentHall ? hallTypeOf(currentHall) : null;
+    var wantType = sessionWantHallType(session);
     var autoResult = null;
 
     function ppPeriodOptions(selectedId) {
@@ -863,7 +876,7 @@
     var splitOtherExists = splitOtherId ? !!App.Store.get('sessions', splitOtherId) : false;
 
     var summary = '<div class="sheet-summary">' +
-      '<div class="sheet-summary-title">' + UI.escapeHtml(course ? course.name : '') + '</div>' +
+      '<div class="sheet-summary-title">' + UI.escapeHtml(course ? App.courseName(course) : '') + '</div>' +
       '<div><span class="k">الجلسة</span> ' + UI.escapeHtml(App.sessionLabel(session, course)) + '</div>' +
       '<div><span class="k">التاريخ</span> ' + UI.escapeHtml(UI.fmtDateFull(session.date)) + '</div>' +
       '<div><span class="k">الفترة</span> ' + UI.escapeHtml(period ? period.label : '') + ' ' + (period ? UI.fmtTimeRange(period.start, period.end) : '') + '</div>' +

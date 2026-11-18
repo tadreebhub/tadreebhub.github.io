@@ -18,17 +18,36 @@
     var directorates = Store.getAll('directorates').slice().sort(byName);
     var groups = Store.getAll('groups').slice().sort(byName);
     var trainees = Store.getAll('trainees').slice().sort(byName);
+    var courseNames = Store.getAll('courseNames').slice().sort(byName);
 
     function byName(a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'ar'); }
 
     var html = '';
     html += '<div class="page-head"><div><h1>الدليل</h1>' +
-      '<div class="muted">المدربون والمديريات والمجموعات التدريبية والقاعات والمتدربون</div></div>' +
+      '<div class="muted">الدورات والمدربون والمديريات والمجموعات التدريبية والقاعات والمتدربون</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="dir-export-btn">تصدير إكسل ↓</button></div></div>';
 
     // لوحة إحصاءات الدليل (v2.1 — بند 10) — تُرسم بعد innerHTML
     // عبر TadreebStats (انظر أسفل render).
     html += '<div id="dir-stats-panel"></div>';
+
+    // الدورات (v2.3.1 — دليل الدورات): أسماء المناهج التي تُبنى
+    // عليها مجموعات التدريب. إعادة تسمية دورة تنتشر فوراً إلى كل
+    // المجموعات التي تستخدمها؛ ودورة مستخدمة لا تُحذف.
+    html += '<div class="card-white"><div class="section-title-row"><h2>الدورات (' + courseNames.length + ')</h2>' +
+      (canWrite ? '<button class="btn btn-sm" type="button" data-add="courseName">إضافة دورة</button>' : '') + '</div>';
+    if (!courseNames.length) {
+      html += UI.emptyState('لا دورات مسجلة', 'أضف أسماء الدورات (المناهج) هنا لتختار منها عند إنشاء مجموعة تدريب جديدة.');
+    } else {
+      courseNames.forEach(function (cn) {
+        var useCount = Store.getAll('courses').filter(function (c) { return c.courseId === cn.id; }).length;
+        html += listRow(
+          '<strong>' + UI.escapeHtml(cn.name) + '</strong>',
+          useCount ? 'مُستخدمة في ' + countLabel(useCount, COUNT_FORMS.courses) : 'غير مستخدمة في أي مجموعة تدريب',
+          actionRow('courseName', cn.id, canWrite));
+      });
+    }
+    html += '</div>';
 
     // المدربون — قائمة مرتبة (نمط v2.1 المشترك: اسم + معرّف +
     // حقائق أساسية + أزرار إجراءات ظاهرة).
@@ -39,11 +58,13 @@
     } else {
       trainers.forEach(function (t) {
         var courseCount = Store.getAll('courses').filter(function (c) { return c.trainerId === t.id; }).length;
+        var trainerMeta = UI.escapeHtml(t.specialty || 'بلا تخصص') + ' · ' +
+            '<span class="ltr">' + UI.escapeHtml(t.phone || 'بلا هاتف') + '</span> · ' +
+            countLabel(courseCount, COUNT_FORMS.courses);
+        if (t.notes) trainerMeta += '<br>' + UI.escapeHtml(t.notes);
         html += listRow(
           '<strong>' + UI.escapeHtml(t.name) + '</strong> ' + codePill(t, 'trainers'),
-          UI.escapeHtml(t.specialty || 'بلا تخصص') + ' · ' +
-            '<span class="ltr">' + UI.escapeHtml(t.phone || 'بلا هاتف') + '</span> · ' +
-            countLabel(courseCount, COUNT_FORMS.courses),
+          trainerMeta,
           actionRow('trainer', t.id, canWrite));
       });
     }
@@ -325,7 +346,10 @@
     hall: { col: 'halls', label: 'القاعة', title: 'قاعة' },
     directorate: { col: 'directorates', label: 'المديرية', title: 'مديرية' },
     group: { col: 'groups', label: 'المجموعة', title: 'مجموعة تدريبية' },
-    trainee: { col: 'trainees', label: 'المتدرب', title: 'متدرب' }
+    trainee: { col: 'trainees', label: 'المتدرب', title: 'متدرب' },
+    // دليل الدورات (v2.3.1): إدخالات اسم فقط بلا معرّف — لذا
+    // noCode يتخطى حقل المعرّف والتحقق من فرادته.
+    courseName: { col: 'courseNames', label: 'الدورة', title: 'دورة', noCode: true }
   };
 
   // حقل المعرّف: عند الإنشاء يُملأ بالرمز التالي المتاح، وعند التعديل
@@ -539,7 +563,11 @@
         return '<div class="field"><label>الاسم *</label><input type="text" name="name" required value="' + UI.escapeHtml(item.name || '') + '"></div>' +
           codeFieldFor(type, item) +
           '<div class="field"><label>التخصص</label><input type="text" name="specialty" value="' + UI.escapeHtml(item.specialty || '') + '"></div>' +
-          '<div class="field"><label>رقم الهاتف</label><input type="text" name="phone" value="' + UI.escapeHtml(item.phone || '') + '"></div>';
+          '<div class="field"><label>رقم الهاتف</label><input type="text" name="phone" value="' + UI.escapeHtml(item.phone || '') + '"></div>' +
+          '<div class="field"><label>ملاحظة</label><textarea name="notes">' + UI.escapeHtml(item.notes || '') + '</textarea></div>';
+      case 'courseName':
+        return '<div class="field"><label>اسم الدورة *</label><input type="text" name="name" required value="' + UI.escapeHtml(item.name || '') + '" placeholder="مثال: دورة إكسل"></div>' +
+          (item.id ? '<div class="field-hint">إعادة التسمية تظهر فوراً في كل مجموعات التدريب التي تستخدم هذه الدورة.</div>' : '');
       case 'hall':
         return '<div class="field"><label>اسم القاعة *</label><input type="text" name="name" required value="' + UI.escapeHtml(item.name || '') + '"></div>' +
           codeFieldFor(type, item) +
@@ -580,7 +608,8 @@
       return el ? el.value.trim() : '';
     };
     switch (type) {
-      case 'trainer': return { name: v('name'), code: v('code'), specialty: v('specialty'), phone: v('phone') };
+      case 'trainer': return { name: v('name'), code: v('code'), specialty: v('specialty'), phone: v('phone'), notes: v('notes') };
+      case 'courseName': return { name: v('name') };
       case 'hall': {
         var cap = form.querySelector('[name="capacity"]').value;
         var hallTypeEl = form.querySelector('[name="hallType"]');
@@ -616,12 +645,12 @@
   // excludeId: معرّف السجل الجاري تعديله (يُستثنى من فحص التكرار حتى
   // لا يُعدَّ رمزه الحالي مكرراً)؛ بلا قيمة عند الإنشاء.
   function validateFormData(type, data, form, excludeId) {
-    if (type === 'trainee' || type === 'trainer' || type === 'hall' || type === 'directorate' || type === 'group') {
+    if (type === 'trainee' || type === 'trainer' || type === 'hall' || type === 'directorate' || type === 'group' || type === 'courseName') {
       if (!data.name) { UI.formError(form, 'الاسم مطلوب'); return false; }
     }
     if (type === 'group' && !data.directorateId) { UI.formError(form, 'المديرية مطلوبة — المجموعة تنتمي إلى مديرية'); return false; }
     var meta = ENTITY_META[type];
-    if (meta) {
+    if (meta && !meta.noCode) {
       if (!data.code) { UI.formError(form, 'المعرّف مطلوب'); return false; }
       if (!App.isCodeUnique(meta.col, data.code, excludeId || null)) {
         UI.formError(form, 'هذا المعرّف مستخدم من قبل — اختر معرّفاً آخر');
@@ -693,6 +722,14 @@
       var groupCourseCount = App.Store.getAll('courses').filter(function (c) { return c.groupId === id; }).length;
       if (groupCourseCount) {
         UI.toast('لا يمكن حذف هذه المجموعة — معيّنة في ' + groupCourseCount + ' مجموعة تدريب', 'error');
+        return;
+      }
+    }
+    // الدورة المستخدمة في أي مجموعة تدريب لا تُحذف أبداً (v2.3.1).
+    if (type === 'courseName') {
+      var usedInCount = App.Store.getAll('courses').filter(function (c) { return c.courseId === id; }).length;
+      if (usedInCount) {
+        UI.toast('لا يمكن حذف هذه الدورة — مستخدمة في ' + usedInCount + ' مجموعة تدريب', 'error');
         return;
       }
     }

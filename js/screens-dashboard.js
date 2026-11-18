@@ -99,7 +99,7 @@
           // إجراءات الجلسة نفسها). صنف .session-item محفوظ
           // (الاختبارات تنقر عليه).
           todayHtml += '<div class="session-item list-row clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
-            '<div class="list-row-main"><div class="list-row-title"><strong>' + UI.escapeHtml(course ? course.name : '') + '</strong> ' +
+            '<div class="list-row-main"><div class="list-row-title"><strong>' + UI.escapeHtml(course ? App.courseName(course) : '') + '</strong> ' +
             '<span class="pill pill-grey">' + UI.escapeHtml(App.sessionLabel(s, course)) + '</span></div>' +
             '<div class="list-row-meta muted">' + UI.escapeHtml(App.hallName(s.hallId) || 'بلا قاعة') +
             ' · ' + UI.escapeHtml(course ? App.trainerName(course.trainerId) || 'بلا مدرب' : '') +
@@ -133,7 +133,7 @@
           var period = Store.get('periods', s.periodId);
           html += '<div class="list-row clickable" data-session-open="' + UI.escapeHtml(s.id) + '">' +
             '<div class="list-row-main"><div class="list-row-title"><strong>' +
-            UI.escapeHtml(course ? course.name : '') + '</strong> ' +
+            UI.escapeHtml(course ? App.courseName(course) : '') + '</strong> ' +
             '<span class="pill pill-grey">' + UI.escapeHtml(App.sessionLabel(s, course)) + '</span></div>' +
             '<div class="list-row-meta muted">' +
             UI.escapeHtml(UI.fmtDateFull(s.date)) + ' · ' +
@@ -156,7 +156,7 @@
         activeCourses.forEach(function (c) {
           var prog = App.courseProgress(c.id);
           html += '<div style="margin-bottom:14px"><div class="section-title-row"><span class="track-name" data-course-open="' +
-            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(App.groupDisplayName(c)) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted" style="flex:1">' +
+            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(App.groupDisplayName(c)) + '</span><span class="muted" style="flex:1">' +
             prog.done + ' من ' + prog.total + ' جلسة</span>' +
             '<button class="btn btn-outline btn-sm" type="button" data-course-open="' + UI.escapeHtml(c.id) + '">عرض</button></div>' +
             '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
@@ -176,12 +176,15 @@
         var budget = App.budgetFromCache(c.id);
         var spentPct = budget.allocated > 0 ? Math.min(100, Math.round((budget.totalSpent / budget.allocated) * 100)) : 0;
         html += '<div class="track-row"><div><div class="track-name" data-course-open="' + UI.escapeHtml(c.id) + '">' +
-          UI.escapeHtml(App.groupDisplayName(c)) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</div>' +
+          UI.escapeHtml(App.groupDisplayName(c)) + '</div>' +
           '<button class="btn btn-outline btn-sm btn-stack" type="button" data-course-open="' + UI.escapeHtml(c.id) + '">عرض</button></div>' +
           '<div class="track-meter"><div class="track-label">الجلسات: ' + prog.done + ' من ' + prog.total + ' · ' + prog.percent + '%</div>' +
           '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>' +
-          '<div class="track-meter"><div class="track-label">الميزانية: ' + UI.fmtMoney(budget.totalSpent) + ' من ' + UI.fmtMoney(budget.allocated) + ' · ' + spentPct + '%</div>' +
-          '<div class="progress"><i style="width:' + spentPct + '%"></i></div></div></div>';
+          (budget.hasBudget
+            ? '<div class="track-meter"><div class="track-label">الميزانية: ' + UI.fmtMoney(budget.totalSpent) + ' من ' + UI.fmtMoney(budget.allocated) + ' · ' + spentPct + '%</div>' +
+              '<div class="progress"><i style="width:' + spentPct + '%"></i></div></div>'
+            : '<div class="track-meter"><div class="track-label">الميزانية: بدون ميزانية</div></div>') +
+          '</div>';
       });
     }
     html += '</div>';
