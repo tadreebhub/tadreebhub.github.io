@@ -84,6 +84,14 @@ service cloud.firestore {
         && request.resource.data.setupComplete == true;
       allow delete: if false;
     }
+    // ---------- الإعدادات العامة (meta/general) ----------
+    // أيام العطلة الأسبوعية (v2.3): القراءة لأي مسجّل دخول بملف
+    // شخصي نشط؛ الكتابة للمدير فقط؛ لا حذف أبداً.
+    match /meta/general {
+      allow read: if hasProfile();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
     // أي مستند meta آخر: مغلق تماماً.
     match /meta/{other} {
       allow read, write: if false;
@@ -183,11 +191,12 @@ service cloud.firestore {
     }
 
     // ---------- سجل التدقيق ----------
-    // الإنشاء لأي مسجّل دخول بملف شخصي نشط؛ القراءة للمدير فقط؛
-    // لا تعديل ولا حذف أبداً.
+    // الإنشاء لأي مسجّل دخول بملف شخصي نشط؛ القراءة لأي مسجّل
+    // دخول بملف شخصي نشط (صفحة التنبيهات v2.3)؛ لا تعديل ولا
+    // حذف أبداً.
     match /audit/{docId} {
       allow create: if hasProfile();
-      allow read: if isAdmin();
+      allow read: if hasProfile();
       allow update, delete: if false;
     }
 
