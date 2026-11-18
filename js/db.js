@@ -18,6 +18,7 @@
     DIRECTORATES: 'directorates',
     GROUPS: 'groups',
     LEVELS: 'levels',
+    COURSE_NAMES: 'courseNames',
     HALLS: 'halls',
     PERIODS: 'periods',
     HOLIDAYS: 'holidays',
@@ -40,37 +41,68 @@
   var MEETING_STATUSES = ['scheduled', 'cancelled'];
   var COURSE_STATUSES = ['active', 'completed', 'cancelled', 'paused'];
 
-  // ---------- أنواع القاعات والدورات (v2.3 — W3) ----------
+  // ---------- أنواع القاعات والدورات (v2.3 — W3؛ v2.3.1: مختلط) ----------
   // القاعة: 'admin' (إدارية) أو 'computer' (حاسوب) في حقل hallType.
-  // الدورة: 'admin' (إداري) أو 'technical' (تقني) في حقل courseType.
-  // توافق رجعي: أي سجل بلا حقل نوع (أو بقيمة غير معروفة) يُعامل
-  // كإداري في كل مكان — لا يتعطل شيء على البيانات القديمة أبداً.
+  // الدورة: 'admin' (إداري) أو 'technical' (تقني) أو 'mixed' (مختلط)
+  // في حقل courseType. المختلط (v2.3.1): جلسات إدارية أولاً ثم
+  // تقنية — عدد كل نوع في حقلي adminSessions و techSessions
+  // (يجب أن يساوي مجموعهما sessionCount). توافق رجعي: أي سجل بلا
+  // حقل نوع (أو بقيمة غير معروفة) يُعامل كإداري في كل مكان — لا
+  // يتعطل شيء على البيانات القديمة أبداً.
   var HALL_TYPES = { ADMIN: 'admin', COMPUTER: 'computer' };
-  var COURSE_TYPES = { ADMIN: 'admin', TECHNICAL: 'technical' };
+  var COURSE_TYPES = { ADMIN: 'admin', TECHNICAL: 'technical', MIXED: 'mixed' };
   var HALL_TYPE_LABELS = { admin: 'إدارية', computer: 'حاسوب' };
-  var COURSE_TYPE_LABELS = { admin: 'إداري', technical: 'تقني' };
+  var COURSE_TYPE_LABELS = { admin: 'إداري', technical: 'تقني', mixed: 'مختلط' };
 
   function hallTypeOf(hall) {
     return (hall && hall.hallType === 'computer') ? 'computer' : 'admin';
   }
 
   function courseTypeOf(course) {
-    return (course && course.courseType === 'technical') ? 'technical' : 'admin';
+    if (!course) return 'admin';
+    if (course.courseType === 'technical') return 'technical';
+    if (course.courseType === 'mixed') return 'mixed';
+    return 'admin';
   }
 
+  // نوع القاعة المطابق لنوع دورة: تقني ← حاسوب، إداري ← إدارية.
+  // المختلط بلا نوع قاعة واحد (يستخدم النوعين حسب ترتيب الجلسة)
+  // فيُعاد null — والمستدعون يعاملون null كـ«كل القاعات».
   function hallTypeForCourseType(courseType) {
-    return courseType === 'technical' ? 'computer' : 'admin';
+    if (courseType === 'technical') return 'computer';
+    if (courseType === 'admin') return 'admin';
+    return null;
+  }
+
+  // عدد الجلسات الإدارية في دورة مختلطة (حقل adminSessions)؛ قيمة
+  // غير صالحة أو غائبة ← نصف عدد الجلسات (تقريباً لأعلى) — حتى لا
+  // تتعطل دورة مختلطة قديمة بلا تقسيم مخزَّن.
+  function mixedAdminCount(course) {
+    var total = (course && Number(course.sessionCount)) || 0;
+    var n = (course && Number(course.adminSessions));
+    if (isFinite(n) && n >= 1 && total > 0 && n < total) return Math.floor(n);
+    if (total > 0) return Math.ceil(total / 2);
+    return 0;
+  }
+
+  // نوع جلسة ما في دورة حسب ترتيبها الزمني (0-based): المختلط —
+  // الجلسات الأولى (حتى adminSessions) إدارية، والباقية تقنية؛
+  // غير المختلط — نوع الدورة نفسه لكل الجلسات.
+  function sessionCourseType(course, index) {
+    if (courseTypeOf(course) !== 'mixed') return courseTypeOf(course);
+    return (index >= 0 && index < mixedAdminCount(course)) ? 'admin' : 'technical';
   }
 
   // القاعات المطابقة لنوع دورة: قاعات النوع المطابق فقط (تقنية ←
   // حاسوب، إدارية ← إدارية). قاعدة الرجوع الآمن (موثقة): إن لم توجد
   // قاعة من النوع المطابق أصلاً تُرجع كل القاعات — حتى لا يصل
-  // الإسناد التلقائي إلى طريق مسدود. بلا نوع محدد (null) تُرجع كل
-  // القاعات دون تصفية (سلوك ما قبل الأنواع).
+  // الإسناد التلقائي إلى طريق مسدود. بلا نوع محدد (null) أو نوع
+  // مختلط (يستخدم النوعين) تُرجع كل القاعات دون تصفية.
   function matchingHalls(halls, courseType) {
     var list = (halls || []).slice();
     if (courseType == null || courseType === '') return list;
     var want = hallTypeForCourseType(courseType);
+    if (want == null) return list;
     var typed = list.filter(function (h) { return hallTypeOf(h) === want; });
     return typed.length ? typed : list;
   }
@@ -310,7 +342,7 @@
     var startS = dateStr(start);
     var endS = dateStr(end);
 
-    var course, holidaysSet, existingDates, existingCount, halls, occupied;
+    var course, holidaysSet, existingDates, existingDateList, existingCount, halls, occupied;
 
     return get(COLLECTIONS.COURSES, courseId).then(function (c) {
       if (!c) throw new Error('مجموعة التدريب غير موجودة');
@@ -335,9 +367,11 @@
     }).then(function (results) {
       holidaysSet = new Set(results[0].map(function (h) { return h.date; }));
       existingDates = new Set();
+      existingDateList = [];
       existingCount = 0;
       results[1].forEach(function (doc) {
         existingDates.add(doc.data().date);
+        existingDateList.push(doc.data().date);
         existingCount++;
       });
       occupied = {}; // "date|periodId" -> Set(hallId)
@@ -387,6 +421,16 @@
 
         // الخطة الأسبوعية (v1.1): فترة وقاعة لكل يوم على حدة؛ الدورات
         // القديمة بلا dayPlan تأخذ الفترة الرئيسية وأول قاعة حرة كما قبل.
+        // المختلط (v2.3.1): نوع القاعة حسب ترتيب الجلسة الزمني —
+        // الجلسات الأولى (حتى adminSessions) إدارية ثم التقنية؛
+        // الترتيب = الجلسات الموجودة قبل هذا التاريخ + المنشأة في
+        // هذا التشغيل (كلها قبل هذا التاريخ — الحلقة تسير زمنياً).
+        var slotHalls = typeHalls;
+        if (courseTypeOf(course) === 'mixed') {
+          var idxBefore = 0;
+          existingDateList.forEach(function (ed) { if (ed < ds) idxBefore++; });
+          slotHalls = matchingHalls(halls, sessionCourseType(course, idxBefore + created));
+        }
         var plan = (course.dayPlan && course.dayPlan[d.getDay()]) || null;
         var periodId = plan && plan.periodId ? plan.periodId : course.periodId;
         var hallId = null;
@@ -400,16 +444,16 @@
           var hallExists = halls.some(function (hh) { return hh.id === plan.hallId; });
           if (!hallExists) {
             // القاعة المطلوبة حُذفت: أول قاعة حرة من النوع المطابق.
-            for (var hi = 0; hi < typeHalls.length; hi++) {
-              if (!busy.has(typeHalls[hi].id)) { hallId = typeHalls[hi].id; break; }
+            for (var hi = 0; hi < slotHalls.length; hi++) {
+              if (!busy.has(slotHalls[hi].id)) { hallId = slotHalls[hi].id; break; }
             }
           } else if (!busy.has(plan.hallId)) {
             hallId = plan.hallId;
           }
         } else {
           // أول قاعة حرة من النوع المطابق في ذلك التاريخ والفترة.
-          for (var h = 0; h < typeHalls.length; h++) {
-            if (!busy.has(typeHalls[h].id)) { hallId = typeHalls[h].id; break; }
+          for (var h = 0; h < slotHalls.length; h++) {
+            if (!busy.has(slotHalls[h].id)) { hallId = slotHalls[h].id; break; }
           }
         }
         if (hallId) {
@@ -701,8 +745,26 @@
       var uniqueIds = courseIds.filter(function (v, i, a) { return a.indexOf(v) === i; });
       return Promise.all(uniqueIds.map(function (id) { return get(COLLECTIONS.COURSES, id); }))
         .then(function (courses) {
-          var names = {};
-          courses.forEach(function (c) { if (c) names[c.id] = c.name; });
+          // v2.3.1 — دليل الدورات: اسم الجلسة الشاغلة يُحلُّ من
+          // الدليل عند ربط المجموعة بإدخال، وإلا الاسم المخزَّن.
+          var catalogIds = [];
+          courses.forEach(function (c) {
+            if (c && c.courseId && catalogIds.indexOf(c.courseId) === -1) catalogIds.push(c.courseId);
+          });
+          return Promise.all(catalogIds.map(function (id) { return get(COLLECTIONS.COURSE_NAMES, id); }))
+            .then(function (entries) {
+              var catalogNames = {};
+              entries.forEach(function (e) { if (e && e.name) catalogNames[e.id] = e.name; });
+              var names = {};
+              courses.forEach(function (c) {
+                if (c) names[c.id] = (c.courseId && catalogNames[c.courseId]) || c.name;
+              });
+              return { halls: halls, names: names };
+            });
+        })
+        .then(function (resolved) {
+          var halls = resolved.halls;
+          var names = resolved.names;
           var rows = halls.map(function (hall) {
             var courseId = byHall[hall.id] || null;
             var meetingTitle = byMeeting[hall.id] || null;
@@ -1323,14 +1385,10 @@
   // السبت)، والافتراضي الجمعة + السبت. القراءة المتزامنة من ذاكرة
   // محلية (تُملأ عند أول طلب + مستمع حي يُبقيها محدَّثة) حتى
   // يقرأها أي عامل دفاعياً دون انتظار وعد.
-  // ⚠️ قيد النشر (بلوكر — على الأب حله قبل النشر الحي): قواعد
-  // Firestore الحالية ترفض أي مستند meta غير setup تماماً
-  // (match /meta/{other} { allow read, write: if false; })، فقراءة
-  // meta/general وكتابته ستفشلان في الإنتاج حتى تُضاف قاعدة تسمح
-  // للمدير بالكتابة ولأي مسجّل دخول بملف نشط بالقراءة. عند الفشل
-  // يبقى الافتراضي [5، 6] سارياً (سلوك آمن)، وفشل الحفظ يظهر
-  // للمستخدم كخطأ صريح لا كنجاح وهمي. محاكاة الاختبار لا تفرض
-  // القواعد، فالمسبار لا يكشف هذا القيد — يُتحقق حياً بعد النشر.
+  // ⚠️ القواعد: meta/general مسموح للمدير كتابةً ولأي مسجّل دخول
+  // بملف نشط قراءةً (نُشرت القاعدة مع v2.3). عند الفشل يبقى
+  // الافتراضي [5، 6] سارياً (سلوك آمن)، وفشل الحفظ يظهر للمستخدم
+  // كخطأ صريح لا كنجاح وهمي.
   // الدوال العامة add/update ترفض META عمداً (انظر أعلاه)، لذا
   // تُكتب هنا مباشرة عبر doc().set كما يفعل auth.js لـ meta/setup.
   var DEFAULT_WEEKEND_DAYS = [5, 6];
@@ -1427,6 +1485,97 @@
     });
   }
 
+  // --- ترحيل أرقام المجموعات لمرة واحدة (v2.3.1) ---
+  // المشكلة: كل المجموعات التي أُنشئت قبل v2.3 بلا groupNumber
+  // مخزَّن، فأرقامها مشتقة من ترتيب الإنشاء — أي إضافة أو حذف يعيد
+  // ترقيم القائمة كلها أمام المستخدم، وقد يتصادم رقم مشتق مع رقم
+  // مخزَّن (مجموعتان بالرقم نفسه). الترحيل يثبّت الأرقام: عند أول
+  // دخول مدير بعد v2.3.1، يُكتب لكل دورة بلا رقم مخزَّن رقمها
+  // المشتق الحالي (والرمز المشتق إن غاب) في مستندها — فتصبح
+  // الأرقام ثابتة إلى الأبد. الخوارزمية هي نفسها في App.groupNumber
+  // و App.displayCode (ترتيب الإنشاء، المخزَّن يُحترم، المشتق أصغر
+  // رقم حر) فالأرقام المثبتة تطابق المعروض اليوم تماماً.
+  // آمن للتكرار: يكتب فقط ما ينقصه الرقم أو الرمز؛ وعلامة مرة
+  // واحدة في meta/general (migratedGroupNumbers: true) تمنع إعادة
+  // التشغيل. مدير فقط (كتابة meta/general مقصورة على المدير في
+  // القواعد). سجل تدقيق واحد ملخَّص — لا إدخال لكل دورة.
+  // ملاحظة: علامة meta تُكتب مع بيانات المستند الحالية كاملةً
+  // (set مع merge) حتى لا تُمحى أيام العطلة المخزَّنة فيه.
+  var groupNumbersMigrationStarted = false;
+
+  function createdMsValue(v) {
+    if (v == null) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v.toMillis === 'function') { try { return v.toMillis(); } catch (e) { return 0; } }
+    if (typeof v.seconds === 'number') return v.seconds * 1000;
+    if (typeof v === 'string') { var ms = Date.parse(v); return isNaN(ms) ? 0 : ms; }
+    return 0;
+  }
+
+  function migrateGroupNumbers() {
+    if (groupNumbersMigrationStarted) return Promise.resolve({ already: true });
+    groupNumbersMigrationStarted = true;
+    var profile = currentProfile();
+    if (!profile || profile.role !== 'admin') return Promise.resolve({ skipped: true });
+    var generalRef = db().collection(COLLECTIONS.META).doc('general');
+    return generalRef.get().then(function (snap) {
+      var generalData = (snap && snap.exists) ? (snap.data() || {}) : {};
+      if (generalData.migratedGroupNumbers === true) return { already: true };
+      return list(COLLECTIONS.COURSES).then(function (courses) {
+        var sorted = courses.slice().sort(function (a, b) {
+          var d = createdMsValue(a.createdAt) - createdMsValue(b.createdAt);
+          if (d) return d;
+          return String(a.id || '') < String(b.id || '') ? -1 : String(a.id || '') > String(b.id || '') ? 1 : 0;
+        });
+        var usedNumbers = {};
+        var usedCodes = {};
+        sorted.forEach(function (c) {
+          if (typeof c.groupNumber === 'number' && isFinite(c.groupNumber) && c.groupNumber >= 1) {
+            usedNumbers[Math.floor(c.groupNumber)] = true;
+          }
+          if (typeof c.code === 'string') {
+            var m = /^دور-(\d+)$/.exec(c.code.trim());
+            if (m) usedCodes[parseInt(m[1], 10)] = true;
+          }
+        });
+        var batch = db().batch();
+        var count = 0;
+        sorted.forEach(function (c) {
+          var patch = {};
+          if (!(typeof c.groupNumber === 'number' && isFinite(c.groupNumber) && c.groupNumber >= 1)) {
+            var n = 1;
+            while (usedNumbers[n]) n++;
+            usedNumbers[n] = true;
+            patch.groupNumber = n;
+          }
+          if (!(typeof c.code === 'string' && c.code.trim())) {
+            var k = 1;
+            while (usedCodes[k]) k++;
+            usedCodes[k] = true;
+            patch.code = 'دور-' + (k < 10 ? '0' : '') + k;
+          }
+          if (Object.keys(patch).length) {
+            batch.update(db().collection(COLLECTIONS.COURSES).doc(c.id), patch);
+            count++;
+          }
+        });
+        var flagData = Object.assign({}, generalData, { migratedGroupNumbers: true });
+        batch.set(generalRef, flagData, { merge: true });
+        return batch.commit().then(function () {
+          if (count > 0) {
+            logAudit('update', COLLECTIONS.COURSES, 'migration',
+              'ترحيل أرقام المجموعات: ثُبّت الرقم والرمز لـ ' + count + ' مجموعة');
+          }
+          return { migrated: count };
+        });
+      });
+    }).catch(function (err) {
+      console.warn('[تدريب] تعذّر ترحيل أرقام المجموعات — سيُعاد المحاولة عند الدخول التالي:', err && err.message);
+      groupNumbersMigrationStarted = false;
+      return { error: true };
+    });
+  }
+
   window.TadreebDB = {
     COLLECTIONS: COLLECTIONS,
     ATTENDANCE_STATUSES: ATTENDANCE_STATUSES,
@@ -1463,7 +1612,8 @@
     courseBudgetSummary: courseBudgetSummary,
     logAudit: logAudit,
     subscribe: subscribe,
-    // أنواع القاعات والدورات + أيام العطلة الأسبوعية (v2.3 — W3).
+    // أنواع القاعات والدورات + أيام العطلة الأسبوعية (v2.3 — W3؛
+    // v2.3.1: نوع مختلط + ترحيل أرقام المجموعات).
     HALL_TYPES: HALL_TYPES,
     COURSE_TYPES: COURSE_TYPES,
     HALL_TYPE_LABELS: HALL_TYPE_LABELS,
@@ -1472,6 +1622,9 @@
     courseTypeOf: courseTypeOf,
     hallTypeForCourseType: hallTypeForCourseType,
     matchingHalls: matchingHalls,
+    mixedAdminCount: mixedAdminCount,
+    sessionCourseType: sessionCourseType,
+    migrateGroupNumbers: migrateGroupNumbers,
     DEFAULT_WEEKEND_DAYS: DEFAULT_WEEKEND_DAYS,
     getWeekendDays: getWeekendDays,
     loadWeekendDays: loadWeekendDays,

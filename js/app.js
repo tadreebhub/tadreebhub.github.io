@@ -22,7 +22,7 @@
   // ---------- المتجر: نسخة محلية من كل المجموعات ----------
   var COLLECTIONS = [
     'courses', 'sessions', 'meetings', 'trainees', 'trainers', 'directorates', 'groups', 'levels',
-    'halls', 'periods', 'holidays', 'expenses', 'budgetCategories'
+    'halls', 'periods', 'holidays', 'expenses', 'budgetCategories', 'courseNames'
   ];
 
   var Store = {
@@ -64,11 +64,22 @@
   }
 
   var rerenderTimer = null;
+  var rerenderDeferred = false;
   function scheduleRerender() {
     // لا نعيد الرسم أثناء الكتابة داخل الشاشة (حتى لا تضيع مدخلات غير محفوظة).
+    // v2.3.1: بدل إسقاط إعادة الرسم تماماً (فتبقى صفوف محذوفة ظاهرة
+    // بأرقام قديمة) نؤجّلها إلى خروج التركيز من الحقل؛ إن انتقل
+    // التركيز إلى حقل آخر يعيد المستمع تسجيل نفسه على الحقل الجديد.
     var active = document.activeElement;
     if (active && active.closest && active.closest('#screen-container') &&
         /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+      if (!rerenderDeferred) {
+        rerenderDeferred = true;
+        active.addEventListener('blur', function onRerenderBlur() {
+          rerenderDeferred = false;
+          scheduleRerender();
+        }, { once: true });
+      }
       return;
     }
     if (rerenderTimer) clearTimeout(rerenderTimer);
@@ -156,7 +167,10 @@
 
   function budgetFromCache(courseId) {
     var course = Store.get('courses', courseId);
-    var allocated = course ? (Number(course.budget) || 0) : 0;
+    // v2.3.1 — ميزانية اختيارية: غياب الحقل (null) يعني «بلا
+    // ميزانية» لا صفراً؛ hasBudget يميّز الحالتين لكل العارضين.
+    var hasBudget = !!(course && course.budget != null && course.budget !== '');
+    var allocated = hasBudget ? (Number(course.budget) || 0) : 0;
     var expenses = Store.getAll('expenses').filter(function (e) { return e.courseId === courseId; })
       .sort(function (a, b) { return (a.date || '') < (b.date || '') ? -1 : 1; });
     var byCategory = {};
@@ -171,6 +185,7 @@
     var computedFee = course ? trainerFeeFor(course) : 0;
     var feeDue = feeRecorded ? 0 : computedFee;
     return {
+      hasBudget: hasBudget,
       allocated: allocated,
       byCategory: byCategory,
       totalSpent: totalSpent,
@@ -218,7 +233,9 @@
     });
     if (!isLiveUpdate) window.scrollTo(0, 0);
     try {
-      var result = screen.render(container, App.currentParams);
+      // isLiveUpdate يمرَّر للشاشة (v2.3.1): تميّز الشاشة دخولاً
+      // صريحاً (يعيد تعيين البحث والمرشحات) عن تحديث حي.
+      var result = screen.render(container, App.currentParams, isLiveUpdate);
       if (typeof result === 'function') currentCleanup = result;
     } catch (err) {
       console.error('[تدريب] خطأ في عرض الشاشة:', err);
@@ -326,6 +343,13 @@
       .then(function () {
         subscribeAll();
         startSession();
+        // ترحيل أرقام المجموعات لمرة واحدة (v2.3.1، مدير فقط):
+        // يثبّت أرقام المجموعات القديمة المشتقة في مستنداتها. يعمل
+        // في الخلفية ولا يعطّل الدخول أبداً؛ الدالة نفسها تحرس
+        // التشغيل المتكرر والفشل.
+        if (profile.role === 'admin' && DB().migrateGroupNumbers) {
+          DB().migrateGroupNumbers().catch(function () {});
+        }
         showScreen('dashboard');
       })
       .catch(function (err) {
@@ -589,6 +613,9 @@
   // الحقل `code` اختياري في قاعدة البيانات؛ السجلات القديمة بلا رمز
   // تُعرض برمز مشتق من ترتيب إنشائها دون كتابة (انظر displayCode)،
   // ويُثبَّت الرمز المشتق عند أول حفظ لها من نماذج التعديل.
+  // v2.3.1: الرقم المشتق يتخطى الأرقام المخزَّنة (أصغر رقم حر) فلا
+  // يتصادم مشتق مع مخزَّن أبداً؛ وترحيل لمرة واحدة (انظر db.js)
+  // يثبّت الأرقام المشتقة في المستندات فلا تعود تتحرك بعدها.
   var CODE_PREFIXES = {
     halls: { prefix: 'ق-', digits: 2 },
     groups: { prefix: 'مج-', digits: 2 },
@@ -645,18 +672,50 @@
     return cfg.prefix + padNum(max + 1, cfg.digits);
   }
 
+  // أرقام السجلات المُسنَدة (v2.3.1): خريطة id → رقم، بترتيب
+  // الإنشاء. الرقم المخزَّن (كما تعيده storedNumberOf) يُحترم؛
+  // السجل بلا رقم مخزَّن يأخذ أصغر رقم حر — فلا يتصادم رقم مشتق
+  // مع رقم مخزَّن أبداً. storedNumberOf تعيد null للاشتقاق، أو
+  // رقماً ≥ 1 للمخزَّن، أو 0 لسجل بلا رقم أصلاً (رمز مخصص غير
+  // رقمي — لا يُسند له رقم ولا يستهلك رقماً حراً).
+  function assignedNumbers(collection, storedNumberOf) {
+    var list = sortedForCode(collection);
+    var used = {};
+    list.forEach(function (doc) {
+      var n = storedNumberOf(doc);
+      if (n != null && n >= 1) used[n] = true;
+    });
+    var map = {};
+    list.forEach(function (doc) {
+      var n = storedNumberOf(doc);
+      if (n === 0) return;
+      if (n == null) {
+        n = 1;
+        while (used[n]) n++;
+        used[n] = true;
+      }
+      map[doc.id] = n;
+    });
+    return map;
+  }
+
   // الرمز المعروض لسجل: المخزَّن إن وُجد، وإلا مشتق من ترتيب الإنشاء
-  // دون كتابة. لا يرمي أبداً ولا يعيد سلسلة فارغة لمجموعة معروفة.
+  // دون كتابة — أصغر رقم حر (v2.3.1) حتى لا يصطدم برمز مخزَّن.
+  // لا يرمي أبداً ولا يعيد سلسلة فارغة لمجموعة معروفة.
   function displayCode(doc, collection) {
     var cfg = CODE_PREFIXES[collection];
     if (!cfg) return (doc && typeof doc.code === 'string') ? doc.code.trim() : '';
     if (doc && typeof doc.code === 'string' && doc.code.trim()) return doc.code.trim();
     if (!doc || doc.id == null) return cfg.prefix + padNum(1, cfg.digits);
-    var list = sortedForCode(collection);
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === doc.id) return cfg.prefix + padNum(i + 1, cfg.digits);
-    }
-    return cfg.prefix + padNum(1, cfg.digits);
+    var map = assignedNumbers(collection, function (d) {
+      if (typeof d.code !== 'string' || !d.code.trim()) return null;
+      var c = d.code.trim();
+      if (c.indexOf(cfg.prefix) !== 0) return 0;
+      var rest = c.slice(cfg.prefix.length);
+      return /^\d+$/.test(rest) ? parseInt(rest, 10) : 0;
+    });
+    var n = map[doc.id];
+    return cfg.prefix + padNum(n || 1, cfg.digits);
   }
 
   // فرادة الرمز داخل المجموعة (مقابل المتجر المحمَّل)؛ excludeId يستثني
@@ -673,18 +732,20 @@
 
   // ---------- هوية مجموعة التدريب (v2.3 — N) ----------
   // رقم المجموعة: المخزَّن (groupNumber) إن وُجد، وإلا مشتق من ترتيب
-  // الإنشاء (النهج نفسه في displayCode) دون كتابة — للمجموعات القديمة
-  // بلا حقل مخزَّن. لا يرمي أبداً.
+  // الإنشاء دون كتابة — أصغر رقم حر (v2.3.1) حتى لا يصطدم رقم مشتق
+  // برقم مخزَّن لمجموعة أخرى. ترحيل v2.3.1 لمرة واحدة يثبّت الأرقام
+  // المشتقة في المستندات فلا تعود تتحرك بعد أي إضافة أو حذف.
+  // لا يرمي أبداً.
   function groupNumber(course) {
     if (course && typeof course.groupNumber === 'number' && isFinite(course.groupNumber) && course.groupNumber >= 1) {
       return Math.floor(course.groupNumber);
     }
     if (!course || course.id == null) return 1;
-    var list = sortedForCode('courses');
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === course.id) return i + 1;
-    }
-    return 1;
+    var map = assignedNumbers('courses', function (c) {
+      return (typeof c.groupNumber === 'number' && isFinite(c.groupNumber) && c.groupNumber >= 1)
+        ? Math.floor(c.groupNumber) : null;
+    });
+    return map[course.id] || 1;
   }
 
   // الرقم التالي عند الإنشاء: أعلى رقم ظاهر (مخزَّن أو مشتق) + 1،
@@ -720,8 +781,9 @@
 
   // جزء المديرية في الاسم التلقائي: المديرية الأساسية المعيّنة
   // (directorateId)، وإلا مديرية المتدربين الوحيدة إن كانت واحدة،
-  // وإلا «مديريات متعددة» عند تعددها، وإلا «بلا مديرية».
-  function groupDirectoratePart(course) {
+  // وإلا «مديريات متعددة» عند تعددها، وإلا fallback (افتراضياً
+  // «بلا مديرية»؛ صيغة الاسم الجديدة v2.3.1 تمرّر '' لحذف الجزء).
+  function groupDirectoratePart(course, fallback) {
     if (course && course.directorateId) {
       var primary = directorateName(course.directorateId);
       if (primary) return primary;
@@ -729,19 +791,56 @@
     var dirs = groupDirectorates(course).filter(function (d) { return d.id; });
     if (dirs.length === 1) return dirs[0].name;
     if (dirs.length > 1) return 'مديريات متعددة';
-    return 'بلا مديرية';
+    return (fallback === undefined) ? 'بلا مديرية' : fallback;
   }
 
-  // الاسم التلقائي: «مجموعة تدريب N — [المديرية] — [اسم الدورة]».
+  // اسم الدورة (المنهج) لمجموعة تدريب (v2.3.1 — دليل الدورات):
+  // إن كانت المجموعة مرتبطة بإدخال في دليل الدورات (courseId)
+  // يُحلُّ الاسم الحالي من الدليل (فإعادة التسمية تنتشر فوراً
+  // إلى كل المجموعات التي تستخدمها)؛ وإلا (مجموعات قديمة بلا
+  // courseId، أو إدخال محذوف) يُستخدم الاسم المخزَّن على المستند.
+  // كل عرض لاسم الدورة في المنصة يمرّ من هنا.
+  function courseName(course) {
+    if (course && course.courseId) {
+      var entry = Store.get('courseNames', course.courseId);
+      if (entry && entry.name) return entry.name;
+    }
+    return (course && typeof course.name === 'string') ? course.name : '';
+  }
+
+  // الاسم التلقائي (v2.3.1 — صيغة جديدة بأمر بدر): «اسم الدورة —
+  // المديرية — المستوى»؛ أي جزء غائب يُحذف (بلا مديرية أو بلا
+  // مستوى يُتخطى — لا «بلا مديرية» ولا «بدون مستوى» في الاسم).
+  // دورة بلا أي جزء (بلا اسم وبلا مديرية وبلا مستوى) ترجع إلى
+  // «مجموعة تدريب N» حتى لا يكون الاسم فارغاً أبداً.
   function groupAutoName(course) {
-    return 'مجموعة تدريب ' + groupNumber(course) + ' — ' +
-      groupDirectoratePart(course) + ' — ' + ((course && course.name) || '');
+    var parts = [];
+    var name = courseName(course).trim();
+    if (name) parts.push(name);
+    var dir = groupDirectoratePart(course, '');
+    if (dir) parts.push(dir);
+    if (course && course.level && course.level !== 'none') {
+      var lvl = levelName(course.level);
+      if (lvl) parts.push(lvl);
+    }
+    if (!parts.length) return 'مجموعة تدريب ' + groupNumber(course);
+    return parts.join(' — ');
   }
 
-  // الاسم المعروض: المخصص إن وُجد، وإلا التلقائي.
+  // الاسم المعروض (السطر الرئيسي): التلقائي + الاسم المخصص
+  // كلاحقة بعده (« — الاسم اليدوي») إن وُجد — لم يعد المخصص
+  // بديلاً عن التلقائي كما في v2.3.
   function groupDisplayName(course) {
+    var base = groupAutoName(course);
     var custom = customGroupName(course);
-    return custom || groupAutoName(course);
+    return custom ? base + ' — ' + custom : base;
+  }
+
+  // الاسم المعروض الكامل للسياقات النصية (التصدير، تسميات
+  // الرزنامة، عناوين النوافذ): السطر الرئيسي + المعرّف بين
+  // قوسين («اسم الدورة — المديرية — المستوى (دور-05)»).
+  function groupDisplayNameFull(course) {
+    return groupDisplayName(course) + ' (' + displayCode(course, 'courses') + ')';
   }
 
   // ملخص مديريات المتدربين للعرض: «مديرية التربية (4) · مديرية الصحة (2)».
@@ -765,6 +864,25 @@
     var c = course || (session.courseId ? Store.get('courses', session.courseId) : null);
     if (!c) return 'ج ' + n;
     return displayCode(c, 'courses') + ' / ج ' + n;
+  }
+
+  // نوع الجلسة في دورتها (v2.3.1): لدورة مختلطة يُشتق من ترتيب
+  // الجلسة الزمني بين جلسات الدورة (الأولى إدارية ثم التقنية)؛
+  // لغير المختلطة نوع الدورة نفسه. يُستخدم عند إعادة الجدولة حتى
+  // تبحث الجلسة عن قاعة من نوعها المطلوب لا نوع قاعتها الحالية.
+  function sessionTypeOf(session) {
+    if (!session) return 'admin';
+    var course = session.courseId ? Store.get('courses', session.courseId) : null;
+    if (!course || !DB() || typeof DB().sessionCourseType !== 'function') {
+      return DB() && typeof DB().courseTypeOf === 'function' ? DB().courseTypeOf(course) : 'admin';
+    }
+    if (DB().courseTypeOf(course) !== 'mixed') return DB().courseTypeOf(course);
+    var list = sessionsForCourse(session.courseId);
+    var idx = 0;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === session.id) { idx = i; break; }
+    }
+    return DB().sessionCourseType(course, idx);
   }
 
   // متدربو الدورة: إن كانت معيّنة لمجموعة لها أعضاء، فأعضاء المجموعة
@@ -797,7 +915,7 @@
         return {
           period: periodLabel(s.periodId),
           time: periodTime(s.periodId),
-          course: course ? course.name : '',
+          course: course ? courseName(course) : '',
           hall: hallName(s.hallId),
           trainer: course ? trainerName(course.trainerId) : ''
         };
@@ -812,8 +930,8 @@
     return DB().getSessionAttendance(sessionId).then(function (attMap) {
       var trainees = course ? courseTrainees(course) : [];
       return {
-        courseName: course ? course.name : '',
-        displayName: course ? groupDisplayName(course) : '',
+        courseName: course ? courseName(course) : '',
+        displayName: course ? groupDisplayNameFull(course) : '',
         sessionDate: session.date,
         periodLabel: periodLabel(session.periodId),
         hallName: hallName(session.hallId),
@@ -870,8 +988,8 @@
     });
     return chain.then(function () {
       return {
-        courseName: course.name,
-        displayName: groupDisplayName(course),
+        courseName: courseName(course),
+        displayName: groupDisplayNameFull(course),
         groupName: groupNameVal,
         directorate: groupDirVal,
         sessions: outSessions
@@ -898,8 +1016,8 @@
     var groupDirVal = groupDoc ? directorateName(groupDoc.directorateId) : '';
     var groupLabel = groupNameVal ? (groupDirVal ? groupNameVal + ' — ' + groupDirVal : groupNameVal) : '';
     var info = {
-      name: course.name,
-      displayName: groupDisplayName(course),
+      name: courseName(course),
+      displayName: groupDisplayNameFull(course),
       groupNumber: groupNumber(course),
       customName: customGroupName(course),
       directoratesSummary: groupDirectoratesSummary(course),
@@ -997,7 +1115,7 @@
           return s.date === day.date && s.periodId === p.id && s.state !== 'cancelled' && s.state !== 'holiday';
         }).map(function (s) {
           var course = Store.get('courses', s.courseId);
-          return { kind: 'session', course: course ? course.name : '', hall: hallName(s.hallId) };
+          return { kind: 'session', course: course ? courseName(course) : '', hall: hallName(s.hallId) };
         });
         // الاجتماعات العارضة المجدولة تشغل قاعاتها في الرزنامة أيضاً؛
         // الملغاة مستثناة (تحرّر القاعة). التصدير يقرأ course/hall فقط.
@@ -1034,7 +1152,7 @@
       if (f.trainerId && (!course || course.trainerId !== f.trainerId)) return;
       entries.push({
         kind: 'session', id: s.id, courseId: s.courseId,
-        course: course ? course.name : '',
+        course: course ? courseName(course) : '',
         trainerId: course ? (course.trainerId || null) : null,
         trainer: course ? trainerName(course.trainerId) : '',
         hallId: s.hallId || null, hall: hallName(s.hallId),
@@ -1102,7 +1220,7 @@
       var sessions = Store.getAll('sessions').filter(function (s) { return s.date === dateStr; })
         .map(function (s) {
           var course = Store.get('courses', s.courseId);
-          return { kind: 'session', course: course ? course.name : '', period: periodLabel(s.periodId) };
+          return { kind: 'session', course: course ? courseName(course) : '', period: periodLabel(s.periodId) };
         });
       // الاجتماعات العارضة المجدولة في هذا اليوم (الملغاة مستثناة).
       Store.getAll('meetings').filter(function (m) {
@@ -1133,8 +1251,8 @@
       var prog = courseProgress(c.id);
       var period = periodFor(c);
       return {
-        name: c.name,
-        displayName: groupDisplayName(c),
+        name: courseName(c),
+        displayName: groupDisplayNameFull(c),
         trainer: trainerName(c.trainerId),
         days: UI.daysLabel(c.days),
         period: period ? period.label : '',
@@ -1175,8 +1293,8 @@
       var rate = counts.recorded ? Math.round((counts.present / counts.recorded) * 100) : 0;
       return {
         row: {
-          name: course.name || '',
-          displayName: groupDisplayName(course),
+          name: courseName(course) || '',
+          displayName: groupDisplayNameFull(course),
           code: displayCode(course, 'courses'),
           level: levelName(course.level),
           group: groupName(course.groupId) || '',
@@ -1189,9 +1307,10 @@
           pct: prog.pct,
           trainees: courseTrainees(course).length,
           attendanceRate: rate,
-          budget: Number(course.budget) || 0,
+          budget: budget.hasBudget ? Number(course.budget) : null,
+          hasBudget: budget.hasBudget,
           spent: budget.totalSpent,
-          budgetRemaining: budget.remaining
+          budgetRemaining: budget.hasBudget ? budget.remaining : null
         },
         present: counts.present,
         recorded: counts.recorded
@@ -1231,9 +1350,12 @@
           summary.sessionsTotal += res.row.total;
           summary.sessionsDone += res.row.done;
           summary.traineesTotal += res.row.trainees;
-          summary.budgetTotal += res.row.budget;
+          // v2.3.1: المجموعات بلا ميزانية خارج إجمالي الميزانيات
+          // والمتبقي (مصروفها يُحسب في إجمالي المصروف لأنه إنفاق
+          // فعلي، لكن «المتبقي» غير معرّف بلا ميزانية).
+          if (res.row.budget != null) summary.budgetTotal += res.row.budget;
           summary.spentTotal += res.row.spent;
-          summary.remainingTotal += res.row.budgetRemaining;
+          if (res.row.budgetRemaining != null) summary.remainingTotal += res.row.budgetRemaining;
         });
       });
     });
@@ -1279,8 +1401,9 @@
     var course = Store.get('courses', courseId);
     var budget = budgetFromCache(courseId);
     return {
-      courseName: course ? course.name : '',
-      displayName: course ? groupDisplayName(course) : '',
+      courseName: course ? courseName(course) : '',
+      displayName: course ? groupDisplayNameFull(course) : '',
+      hasBudget: budget.hasBudget,
       allocated: budget.allocated,
       totalSpent: budget.totalSpent,
       remaining: budget.remaining,
@@ -1341,15 +1464,16 @@
       var prog = courseProgress(c.id);
       var budget = budgetFromCache(c.id);
       return {
-        name: c.name,
-        displayName: groupDisplayName(c),
+        name: courseName(c),
+        displayName: groupDisplayNameFull(c),
         trainer: trainerName(c.trainerId),
         progress: prog.percent,
         done: prog.done,
         total: prog.total,
-        budget: Number(c.budget) || 0,
+        budget: budget.hasBudget ? Number(c.budget) : null,
+        hasBudget: budget.hasBudget,
         spent: budget.totalSpent,
-        remaining: budget.remaining,
+        remaining: budget.hasBudget ? budget.remaining : null,
         status: UI.COURSE_STATUS_LABELS[c.status] || c.status
       };
     });
@@ -1382,8 +1506,8 @@
   function buildBackupData() {
     var courses = Store.getAll('courses').map(function (c) {
       return {
-        name: c.name,
-        displayName: groupDisplayName(c),
+        name: courseName(c),
+        displayName: groupDisplayNameFull(c),
         trainer: trainerName(c.trainerId),
         days: UI.daysLabel(c.days),
         period: periodLabel(c.periodId),
@@ -1396,7 +1520,7 @@
     var sessions = Store.getAll('sessions').map(function (s) {
       var course = Store.get('courses', s.courseId);
       return {
-        course: course ? groupDisplayName(course) : '',
+        course: course ? groupDisplayNameFull(course) : '',
         date: s.date,
         day: UI.fmtWeekday(s.date),
         period: periodLabel(s.periodId),
@@ -1415,7 +1539,7 @@
         name: t.name,
         directorate: directorateName(t.directorateId),
         phone: t.phone || '',
-        course: course ? groupDisplayName(course) : '',
+        course: course ? groupDisplayNameFull(course) : '',
         notes: t.notes || ''
       };
     });
@@ -1446,7 +1570,7 @@
       var course = Store.get('courses', e.courseId);
       return {
         date: e.date,
-        course: course ? groupDisplayName(course) : '',
+        course: course ? groupDisplayNameFull(course) : '',
         category: e.category,
         description: e.description,
         details: '',
@@ -1529,11 +1653,14 @@
     displayCode: displayCode,
     isCodeUnique: isCodeUnique,
     sessionLabel: sessionLabel,
+    sessionTypeOf: sessionTypeOf,
     courseTrainees: courseTrainees,
     groupNumber: groupNumber,
     nextGroupNumber: nextGroupNumber,
     groupAutoName: groupAutoName,
     groupDisplayName: groupDisplayName,
+    groupDisplayNameFull: groupDisplayNameFull,
+    courseName: courseName,
     customGroupName: customGroupName,
     groupDirectoratesSummary: groupDirectoratesSummary,
     weekDays: weekDays,

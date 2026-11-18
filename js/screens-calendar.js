@@ -624,7 +624,7 @@
               var trainer = null;
               if (course && course.trainerId) trainer = App.Store.get('trainers', course.trainerId);
               html += '<div class="hl ' + (cancelled ? 'hl-cancel' : holiday ? 'hl-holiday' : 'hl-busy') + '" data-session-open="' + UI.escapeHtml(sess.id) + '">' +
-                UI.escapeHtml(shortHall(hall.name)) + ': ' + UI.escapeHtml(course ? course.name : '') +
+                UI.escapeHtml(shortHall(hall.name)) + ': ' + UI.escapeHtml(course ? App.courseName(course) : '') +
                 (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') +
                 (trainer ? '<div class="cal-hl-sub">' + UI.escapeHtml(trainer.name) + '</div>' : '') + '</div>';
             }
@@ -645,7 +645,7 @@
             var trainer = null;
             if (course && course.trainerId) trainer = App.Store.get('trainers', course.trainerId);
             html += '<div class="hl ' + (cancelled ? 'hl-cancel' : holiday ? 'hl-holiday' : 'hl-busy') + '" data-session-open="' + UI.escapeHtml(s.id) + '">بلا قاعة: ' +
-              UI.escapeHtml(course ? course.name : '') + (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') +
+              UI.escapeHtml(course ? App.courseName(course) : '') + (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') +
               (trainer ? '<div class="cal-hl-sub">' + UI.escapeHtml(trainer.name) + '</div>' : '') + '</div>';
           });
         }
@@ -677,7 +677,7 @@
         '<select class="input" id="' + id + '">' + opts + '</select>';
     }
     return '<div class="toolbar">' +
-      sel('cal-filter-course', 'مجموعة التدريب', courses, filterState.courseId, function (c) { return App.groupDisplayName(c); }) +
+      sel('cal-filter-course', 'مجموعة التدريب', courses, filterState.courseId, function (c) { return App.groupDisplayNameFull(c); }) +
       sel('cal-filter-hall', 'القاعة', halls, filterState.hallId) +
       sel('cal-filter-trainer', 'المدرب', trainers, filterState.trainerId) +
       '</div>';
@@ -966,7 +966,7 @@
           // اسم القاعة على شريحة الجلسة (v2.1 — بند 7)؛ الاجتماع
           // يحمل قاعته أصلاً في الشريحة التالية.
           html += '<span class="m-chip' + (cancelled ? ' m-cancel' : holiday ? ' m-holiday' : '') + '" data-session-open="' + UI.escapeHtml(s.id) + '">' +
-            UI.escapeHtml(course ? course.name : '') +
+            UI.escapeHtml(course ? App.courseName(course) : '') +
             (s.hallId ? ' · ' + UI.escapeHtml(shortHall(App.hallName(s.hallId))) : '') +
             (cancelled ? ' · ملغاة' : holiday ? ' · عطلة' : '') + '</span>';
         });

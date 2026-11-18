@@ -18,7 +18,8 @@
     directorate: 'المديرية',
     period: 'الفترة التدريبية',
     holiday: 'يوم العطلة',
-    group: 'المجموعة التدريبية'
+    group: 'المجموعة التدريبية',
+    courseName: 'الدورة'
   };
 
   function db() {

@@ -657,7 +657,7 @@
       ['الفترة التدريبية', asText(info.period)],
       ['تاريخ بدء مجموعة التدريب', asDateText(info.startDate)],
       ['عدد الجلسات', info.sessionCount != null ? asNumber(info.sessionCount) : ''],
-      ['الميزانية (ل.س)', info.budget != null ? asNumber(info.budget) : ''],
+      ['الميزانية (ل.س)', info.budget != null ? asNumber(info.budget) : 'بدون ميزانية'],
       ['الحالة', asText(info.status)],
       ['المديريات', directorates]
     ];
@@ -729,18 +729,23 @@
     var byCategory = budget.byCategory || {};
     var feeDue = budget.trainerFeeDue != null ? asNumber(budget.trainerFeeDue) : trainerFeeDue(contract);
     var recordedFee = byCategory['أجور المدربين'] != null ? asNumber(byCategory['أجور المدربين']) : null;
+    // v2.3.1 — ميزانية اختيارية: بلا ميزانية تُعرض «بدون ميزانية»
+    // بدل الأصفار في المخصصة والمتبقي؛ المصروف يُعرض دائماً.
+    var noBudget = budget.hasBudget === false;
+    var allocText = noBudget ? 'بدون ميزانية' : fmtNumber(budget.allocated) + ' ل.س';
+    var remText = noBudget ? 'بدون ميزانية' : fmtNumber(budget.remaining) + ' ل.س';
     var colCount = expenses ? 4 : 2;
     var ws = createSheet(wb, name, title, subtitle, colCount,
       buildDetailsText(null, subtitle, null,
-        'الميزانية المخصصة: ' + fmtNumber(budget.allocated) + ' ل.س — إجمالي المصروف: ' +
-        fmtNumber(budget.totalSpent) + ' ل.س — المتبقي: ' + fmtNumber(budget.remaining) + ' ل.س'));
+        'الميزانية المخصصة: ' + allocText + ' — إجمالي المصروف: ' +
+        fmtNumber(budget.totalSpent) + ' ل.س — المتبقي: ' + remText));
     var r = HEADER_ROW;
     writeHeaderRow(ws, r, ['البند', 'المبلغ (ل.س)']);
     r++;
     var summary = [
-      ['الميزانية المخصصة', asNumber(budget.allocated)],
+      ['الميزانية المخصصة', noBudget ? 'بدون ميزانية' : asNumber(budget.allocated)],
       ['إجمالي المصاريف', asNumber(budget.totalSpent)],
-      ['المتبقي', asNumber(budget.remaining)]
+      ['المتبقي', noBudget ? 'بدون ميزانية' : asNumber(budget.remaining)]
     ];
     if (feeDue != null) summary.push(['أجور المدربين المستحقة (محسوبة)', feeDue]);
     if (feeDue != null && recordedFee != null) summary.push(['أجور المدربين المسجلة كمصروف', recordedFee]);
@@ -1047,7 +1052,7 @@
         var budget = c.budget != null ? asNumber(c.budget) : null;
         var spent = c.spent != null ? asNumber(c.spent) : null;
         var budgetRemaining = c.budgetRemaining != null ? asNumber(c.budgetRemaining)
-          : ((budget != null && spent != null) ? budget - spent : '');
+          : ((budget != null && spent != null) ? budget - spent : 'بدون ميزانية');
         return [
           asText(c.displayName || c.name),
           asText(c.name),
@@ -1063,7 +1068,7 @@
           c.pct != null ? asNumber(c.pct) : '',
           c.trainees != null ? asNumber(c.trainees) : '',
           c.attendanceRate != null ? asNumber(c.attendanceRate) : '',
-          budget != null ? budget : '',
+          budget != null ? budget : 'بدون ميزانية',
           spent != null ? spent : '',
           budgetRemaining
         ];
@@ -1240,9 +1245,10 @@
     rows.forEach(function (row, i) { writeDataRow(ws, DATA_ROW + i, row); });
     var next = DATA_ROW + rows.length + 1;
     writeHeaderRow(ws, next, ['النتيجة الكاملة للميزانية', 'المبلغ (ل.س)']);
-    writeDataRow(ws, next + 1, ['الميزانية المخصصة', asNumber(budget.allocated)]);
+    var closingNoBudget = budget.hasBudget === false;
+    writeDataRow(ws, next + 1, ['الميزانية المخصصة', closingNoBudget ? 'بدون ميزانية' : asNumber(budget.allocated)]);
     writeDataRow(ws, next + 2, ['إجمالي المصاريف', asNumber(budget.totalSpent)]);
-    writeDataRow(ws, next + 3, ['المتبقي', asNumber(budget.remaining)]);
+    writeDataRow(ws, next + 3, ['المتبقي', closingNoBudget ? 'بدون ميزانية' : asNumber(budget.remaining)]);
     finishSheet(ws, 2);
 
     var filename = 'tadreeb-closing-' + sanitizeFilename(info.name) + '-' + todayString() + '.xlsx';
@@ -1288,7 +1294,7 @@
        'الميزانية (ل.س)', 'المصروف (ل.س)', 'المتبقي (ل.س)', 'الحالة'],
       courses.map(function (c) {
         var rem = c.remaining != null ? asNumber(c.remaining)
-          : (c.budget != null && c.spent != null ? asNumber(c.budget) - asNumber(c.spent) : '');
+          : (c.budget != null && c.spent != null ? asNumber(c.budget) - asNumber(c.spent) : 'بدون ميزانية');
         return [
           asText(c.displayName || c.name),
           asText(c.name),
@@ -1296,7 +1302,7 @@
           c.progress != null ? asNumber(c.progress) : '',
           c.done != null ? asNumber(c.done) : '',
           c.total != null ? asNumber(c.total) : '',
-          c.budget != null ? asNumber(c.budget) : '',
+          c.budget != null ? asNumber(c.budget) : 'بدون ميزانية',
           c.spent != null ? asNumber(c.spent) : '',
           rem,
           asText(c.status)
@@ -1347,7 +1353,7 @@
           asText(c.displayName || c.name), asText(c.name), asText(c.trainer), asText(c.days), asText(c.period),
           c.sessionCount != null ? asNumber(c.sessionCount) : (c.sessions != null ? asNumber(c.sessions) : ''),
           asText(c.status),
-          c.budget != null ? asNumber(c.budget) : '',
+          c.budget != null ? asNumber(c.budget) : 'بدون ميزانية',
           asText(c.notes || c.note)
         ];
       }));

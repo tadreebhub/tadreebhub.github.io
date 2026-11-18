@@ -637,7 +637,7 @@
 
     // القسم 6 — حول المنصة
     html += '<div class="card-white"><div class="section-title-row"><h2>حول المنصة</h2></div>' +
-      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.3</p>' +
+      '<p class="muted" style="margin-top:0">المنصة: تدريب · الإصدار: 2.3.1</p>' +
       '<div class="stats" style="margin-bottom:0">' +
       '<div class="stat"><div class="stat-num" id="settings-count-users">…</div><div class="stat-label">عدد المستخدمين</div></div>' +
       '<div class="stat"><div class="stat-num">' + UI.fmtNumber(Store.getAll('courses').length) + '</div><div class="stat-label">عدد مجموعات التدريب</div></div>' +
