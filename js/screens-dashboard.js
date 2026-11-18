@@ -72,7 +72,7 @@
     html += '<div class="page-head"><div><h1>لوحة المعلومات</h1>' +
       '<div class="muted"><span id="dash-date">' + UI.escapeHtml(dateLine) + '</span>' +
       (hasClock ? ' · <span id="dash-clock" class="ltr">' + UI.escapeHtml(timeLine) + '</span>' : '') + '</div></div>' +
-      '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="dash-export-btn">تصدير إكسل ↓</button></div></div>';
+      '<div class="head-actions tools-bar"><button class="btn btn-outline btn-sm" type="button" id="dash-export-btn">تصدير إكسل ↓</button></div></div>';
 
     // لوحة إحصاءات لوحة التحكم (v2.1 — بند 10): تحل محل شريط
     // البطاقات الأربع القديم؛ تُرسم بعد innerHTML عبر TadreebStats
@@ -149,14 +149,14 @@
 
     // تقدم الدورات النشطة
     if (showCard('progress')) {
-      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">تقدم الدورات النشطة</h2></div>';
+      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">تقدم مجموعات التدريب النشطة</h2></div>';
       if (!activeCourses.length) {
-        html += UI.emptyState('لا دورات نشطة', 'أنشئ دورة جديدة من شاشة الدورات لتبدأ.', App.canWrite() ? 'دورة جديدة' : null, 'dash-new-course');
+        html += UI.emptyState('لا مجموعات تدريب نشطة', 'أنشئ مجموعة تدريب جديدة من شاشة مجموعات التدريب لتبدأ.', App.canWrite() ? 'مجموعة تدريب جديدة' : null, 'dash-new-course');
       } else {
         activeCourses.forEach(function (c) {
           var prog = App.courseProgress(c.id);
           html += '<div style="margin-bottom:14px"><div class="section-title-row"><span class="track-name" data-course-open="' +
-            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted" style="flex:1">' +
+            UI.escapeHtml(c.id) + '">' + UI.escapeHtml(App.groupDisplayName(c)) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</span><span class="muted" style="flex:1">' +
             prog.done + ' من ' + prog.total + ' جلسة</span>' +
             '<button class="btn btn-outline btn-sm" type="button" data-course-open="' + UI.escapeHtml(c.id) + '">عرض</button></div>' +
             '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
@@ -167,17 +167,17 @@
 
     // متابعة الدورات
     if (showCard('tracker')) {
-      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">متابعة الدورات</h2></div>';
+      html += '<div class="card-white"><div class="section-title-row"><h2 style="margin:0">متابعة مجموعات التدريب</h2></div>';
     if (!activeCourses.length) {
-      html += '<div class="muted">لا دورات نشطة للمتابعة.</div>';
+      html += '<div class="muted">لا مجموعات تدريب نشطة للمتابعة.</div>';
     } else {
       activeCourses.forEach(function (c) {
         var prog = App.courseProgress(c.id);
         var budget = App.budgetFromCache(c.id);
         var spentPct = budget.allocated > 0 ? Math.min(100, Math.round((budget.totalSpent / budget.allocated) * 100)) : 0;
         html += '<div class="track-row"><div><div class="track-name" data-course-open="' + UI.escapeHtml(c.id) + '">' +
-          UI.escapeHtml(c.name) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</div>' +
-          '<button class="btn btn-outline btn-sm" type="button" data-course-open="' + UI.escapeHtml(c.id) + '" style="margin-top:6px">عرض</button></div>' +
+          UI.escapeHtml(App.groupDisplayName(c)) + (c.level && c.level !== 'none' ? ' · ' + UI.escapeHtml(App.levelName(c.level)) : '') + '</div>' +
+          '<button class="btn btn-outline btn-sm btn-stack" type="button" data-course-open="' + UI.escapeHtml(c.id) + '">عرض</button></div>' +
           '<div class="track-meter"><div class="track-label">الجلسات: ' + prog.done + ' من ' + prog.total + ' · ' + prog.percent + '%</div>' +
           '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>' +
           '<div class="track-meter"><div class="track-label">الميزانية: ' + UI.fmtMoney(budget.totalSpent) + ' من ' + UI.fmtMoney(budget.allocated) + ' · ' + spentPct + '%</div>' +

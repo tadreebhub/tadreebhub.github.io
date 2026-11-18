@@ -34,12 +34,12 @@
     });
 
     var html = '';
-    html += '<div class="page-head"><div><h1>الدورات</h1>' +
-      '<div class="muted">جميع الدورات التدريبية الحالية والسابقة</div></div>' +
+    html += '<div class="page-head"><div><h1>مجموعات التدريب</h1>' +
+      '<div class="muted">جميع مجموعات التدريب الحالية والسابقة</div></div>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="courses-export-btn">تصدير إكسل ↓</button>';
     if (canWrite) html += '<button class="btn btn-outline btn-sm" type="button" id="courses-stats-btn">تصدير الإحصائيات ↓</button>' +
       '<button class="btn btn-outline btn-sm" type="button" id="courses-attendance-stats-btn">إحصاءات الحضور ↓</button>' +
-      '<button class="btn" type="button" id="new-course-btn">دورة جديدة</button>';
+      '<button class="btn" type="button" id="new-course-btn">مجموعة تدريب جديدة</button>';
     html += '</div></div>';
 
     html += '<div id="courses-stats-panel"></div>';
@@ -54,24 +54,27 @@
       '<option value="all"' + (currentLevelFilter === 'all' ? ' selected' : '') + '>كل المستويات</option>' +
       levelFilterOptionsHtml() + '</select>' +
       '<input type="text" class="input" id="courses-search" placeholder="ابحث بالاسم أو المدرب…" style="flex:1;min-width:200px" value="' +
-      UI.escapeHtml(currentSearch) + '" aria-label="البحث في الدورات">';
+      UI.escapeHtml(currentSearch) + '" aria-label="البحث في مجموعات التدريب">';
     html += '</div>';
 
     html += '<div class="card">';
     if (!courses.length) {
-      html += UI.emptyState('لا دورات هنا', currentFilter === 'all' ?
-        'لم تُنشأ أي دورة بعد.' : 'لا دورات بهذه الحالة.',
-        canWrite && currentFilter === 'all' ? 'دورة جديدة' : null, 'courses-empty-new');
+      html += UI.emptyState('لا مجموعات تدريب هنا', currentFilter === 'all' ?
+        'لم تُنشأ أي مجموعة تدريب بعد.' : 'لا مجموعات تدريب بهذه الحالة.',
+        canWrite && currentFilter === 'all' ? 'مجموعة تدريب جديدة' : null, 'courses-empty-new');
     } else {
       courses.forEach(function (c) {
         var prog = App.courseProgress(c);
         var halls = App.hallsUsedByCourse(c.id);
-        var searchHay = (c.name + ' ' + (App.trainerName(c.trainerId) || '') + ' ' +
+        var displayName = App.groupDisplayName(c);
+        var autoName = App.groupAutoName(c);
+        var searchHay = (c.name + ' ' + displayName + ' ' + (App.trainerName(c.trainerId) || '') + ' ' +
           App.displayCode(c, 'courses')).toLowerCase();
         html += '<div class="list-row clickable" data-course-open="' + UI.escapeHtml(c.id) + '"' +
           ' data-course-search="' + UI.escapeHtml(searchHay) + '">' +
           '<div class="list-row-main">' +
-          '<div class="list-row-title"><strong>' + UI.escapeHtml(c.name) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(c, 'courses')) + '</span> ' + completionPill(prog.status) + '</div>' +
+          '<div class="list-row-title"><strong>' + UI.escapeHtml(displayName) + '</strong> <span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(c, 'courses')) + '</span> ' + completionPill(prog.status) + ' ' + courseTypeBadge(c) + '</div>' +
+          (App.customGroupName(c) ? '<div class="group-auto-subtitle">' + UI.escapeHtml(autoName) + '</div>' : '') +
           '<div class="list-row-meta muted">' + UI.escapeHtml(App.trainerName(c.trainerId) || 'بلا مدرب') + ' · ' + UI.escapeHtml(App.levelName(c.level)) + ' · ' + UI.escapeHtml(UI.daysLabel(c.days)) + '</div>' +
           '<div class="list-row-meta muted">' + UI.escapeHtml(halls.length ? halls.join(' · ') : 'بلا قاعات') + ' · الجلسات: ' + prog.done + '/' + prog.sessionsTotal + ' · المتبقية: ' + prog.sessionsRemaining + ' · المتدربون: ' + UI.fmtNumber(App.courseTrainees(c).length) + '</div>' +
           '<div class="prog-row"><div class="progress"><i style="width:' + prog.pct + '%"></i></div><span class="muted">' + prog.pct + '%</span></div>' +
@@ -85,7 +88,7 @@
         html += '</div></div>';
       });
     }
-    html += '<div class="muted" id="courses-no-results" hidden style="padding:12px 0">لا دورات مطابقة للبحث.</div>';
+    html += '<div class="muted" id="courses-no-results" hidden style="padding:12px 0">لا مجموعات تدريب مطابقة للبحث.</div>';
     html += '</div>';
 
     container.innerHTML = html;
@@ -103,7 +106,7 @@
       var coursesPanelEl = container.querySelector('#courses-stats-panel');
       var coursesRes = window.TadreebStats.computeCourses();
       window.TadreebStats.renderPanel(coursesPanelEl, {
-        section: 'courses', title: 'إحصاءات الدورات', metrics: coursesRes.metrics,
+        section: 'courses', title: 'إحصاءات مجموعات التدريب', metrics: coursesRes.metrics,
         // التصدير كان مقتصراً على الكتابة في الترويسة — نحافظ على ذلك هنا.
         export: canWrite ? {
           label: 'تصدير الإحصاءات ↓',
@@ -222,7 +225,7 @@
             { id: 'rate', label: 'نسبة الحضور %', checked: true }
           ],
           scopeOptions: [
-            { id: 'courses', label: 'حسب الدورة' },
+            { id: 'courses', label: 'حسب مجموعة التدريب' },
             { id: 'groups', label: 'حسب المجموعة' },
             { id: 'trainees', label: 'حسب المتدرب' }
           ],
@@ -240,7 +243,7 @@
     if (exportBtn) {
       exportBtn.addEventListener('click', function () {
         UI.openPicker({
-          title: 'تصدير قائمة الدورات',
+          title: 'تصدير قائمة مجموعات التدريب',
           columns: [
             { id: 'trainer', label: 'المدرب', checked: true },
             { id: 'days', label: 'الأيام', checked: true },
@@ -250,7 +253,7 @@
           ],
           scopeOptions: [
             { id: 'filtered', label: 'العرض الحالي (' + (COMPLETION_FILTER_LABELS[currentFilter] || 'الكل') + ')' },
-            { id: 'all', label: 'كل الدورات' }
+            { id: 'all', label: 'كل مجموعات التدريب' }
           ],
           onConfirm: function (result) {
             var rows = App.buildCoursesListData(result.scope === 'all' ? 'all' : currentFilter);
@@ -306,12 +309,12 @@
     window.TadreebDB.courseDeletePreview(course.id).then(function (preview) {
       if (preview.withAttendance > 0) {
         UI.openModal({
-          title: 'لا يمكن حذف هذه الدورة',
-          bodyHTML: '<p>' + UI.escapeHtml('لا يمكن حذف هذه الدورة — تحتوي ' + preview.withAttendance +
-            ' جلسة على سجلات حضور. يمكنك إيقاف الدورة أو إلغاؤها بدلاً من ذلك.') + '</p>',
+          title: 'لا يمكن حذف مجموعة التدريب هذه',
+          bodyHTML: '<p>' + UI.escapeHtml('لا يمكن حذف مجموعة التدريب هذه — تحتوي ' + preview.withAttendance +
+            ' جلسة على سجلات حضور. يمكنك إيقاف مجموعة التدريب أو إلغاؤها بدلاً من ذلك.') + '</p>',
           actions: [
             {
-              label: 'تعديل الدورة',
+              label: 'تعديل مجموعة التدريب',
               onClick: function (close) { close(); openCourseForm(course); }
             },
             { label: 'إغلاق', className: 'btn-outline', closeOnClick: true }
@@ -320,12 +323,12 @@
         return;
       }
       UI.openModal({
-        title: 'حذف الدورة',
-        bodyHTML: '<p>سيتم حذف الدورة «' + UI.escapeHtml(course.name) + '» نهائياً، مع:</p>' +
+        title: 'حذف مجموعة التدريب',
+        bodyHTML: '<p>سيتم حذف مجموعة التدريب «' + UI.escapeHtml(App.groupDisplayName(course)) + '» نهائياً، مع:</p>' +
           '<ul><li>' + preview.sessions + ' جلسة</li>' +
           '<li>' + preview.expenses + ' مصروف</li></ul>' +
-          '<p>لا تحتوي أي جلسة من جلسات هذه الدورة على سجلات حضور. ' +
-          'سجلات الحضور محمية: لا يمكن حذف دورة فيها جلسات بسجلات حضور. ' +
+          '<p>لا تحتوي أي جلسة من جلسات مجموعة التدريب هذه على سجلات حضور. ' +
+          'سجلات الحضور محمية: لا يمكن حذف مجموعة تدريب فيها جلسات بسجلات حضور. ' +
           'لا يمكن التراجع عن الحذف.</p>',
         actions: [
           {
@@ -334,7 +337,7 @@
             onClick: function (close) {
               close();
               window.TadreebDB.deleteCourse(course.id).then(function () {
-                UI.toast('تم حذف الدورة', 'success');
+                UI.toast('تم حذف مجموعة التدريب', 'success');
                 App.refresh();
               }).catch(UI.toastError);
             }
@@ -353,7 +356,8 @@
   function openCourseActionSheet(course) {
     var prog = App.courseProgress(course);
     var summary = '<div class="sheet-summary">' +
-      '<div class="sheet-summary-title">' + UI.escapeHtml(course.name) + '</div>' +
+      '<div class="sheet-summary-title">' + UI.escapeHtml(App.groupDisplayName(course)) + '</div>' +
+      (App.customGroupName(course) ? '<div><span class="k">الدورة</span> ' + UI.escapeHtml(course.name) + '</div>' : '') +
       '<div><span class="k">المعرّف</span> ' + UI.escapeHtml(App.displayCode(course, 'courses')) + '</div>' +
       '<div><span class="k">المدرب</span> ' + UI.escapeHtml(App.trainerName(course.trainerId) || 'بلا مدرب') + '</div>' +
       '<div><span class="k">الجلسات</span> ' + prog.done + '/' + prog.sessionsTotal + '</div>' +
@@ -364,14 +368,14 @@
       { key: 'edit', label: 'تعديل', attr: 'data-course-edit' },
       { key: 'status', label: 'تغيير الحالة', attr: 'data-course-status' },
       { key: 'rename', label: 'إعادة تسمية', attr: 'data-course-rename' },
-      { key: 'delete', label: 'حذف الدورة', attr: 'data-course-del', danger: true }
+      { key: 'delete', label: 'حذف مجموعة التدريب', attr: 'data-course-del', danger: true }
     ];
     var listHtml = actions.map(function (a) {
       return '<button class="sheet-action' + (a.danger ? ' danger' : '') + '" type="button" ' + a.attr +
         '="' + UI.escapeHtml(course.id) + '" data-sheet-action="' + a.key + '">' + a.label + '</button>';
     }).join('');
     var modal = UI.openModal({
-      title: 'خيارات الدورة',
+      title: 'خيارات مجموعة التدريب',
       width: 'normal',
       bodyHTML: summary + '<div class="sheet-actions">' + listHtml + '</div>',
       actions: [{ label: 'إغلاق', className: 'btn-outline', closeOnClick: true }]
@@ -398,7 +402,7 @@
       return '<option value="' + k + '"' + (k === current ? ' selected' : '') + '>' +
         UI.escapeHtml(UI.COURSE_STATUS_LABELS[k]) + '</option>';
     }).join('');
-    UI.openFormModal('تغيير حالة الدورة — ' + course.name,
+    UI.openFormModal('تغيير حالة مجموعة التدريب — ' + App.groupDisplayName(course),
       '<div class="field"><label>الحالة</label><select name="status">' + opts + '</select></div>',
       function (form, close, submitBtn) {
         var status = form.querySelector('[name="status"]').value;
@@ -407,7 +411,7 @@
         window.TadreebDB.update('courses', course.id, { status: status }).then(function () {
           UI.setBtnLoading(submitBtn, false);
           close();
-          UI.toast('تم تغيير حالة الدورة إلى «' + UI.COURSE_STATUS_LABELS[status] + '»', 'success');
+          UI.toast('تم تغيير حالة مجموعة التدريب إلى «' + UI.COURSE_STATUS_LABELS[status] + '»', 'success');
           App.refresh();
         }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.toastError(err); });
       }, { submitLabel: 'حفظ', width: 'normal' });
@@ -688,6 +692,49 @@
   // نص تحذير تعارض القاعة — صياغة بدر حرفياً.
   var HALL_CONFLICT_WARNING = 'تحذير: القاعة محجوزة — غير متاحة في الفترات المحددة';
 
+  // ---------- أنواع القاعات والدورات (v2.3 — W3) ----------
+  // المصدر الوحيد للحقيقة هو TadreebDB (db.js)؛ هذه الأغلفة
+  // احتياطية إن لم تُحمَّل طبقة البيانات بعد. القاعة: 'admin'
+  // (إدارية) أو 'computer' (حاسوب)؛ الدورة: 'admin' (إداري) أو
+  // 'technical' (تقني)؛ سجل بلا نوع = إداري (توافق رجعي).
+  function typeOfHall(h) {
+    if (window.TadreebDB && typeof window.TadreebDB.hallTypeOf === 'function') {
+      return window.TadreebDB.hallTypeOf(h);
+    }
+    return (h && h.hallType === 'computer') ? 'computer' : 'admin';
+  }
+
+  function typeOfCourse(c) {
+    if (window.TadreebDB && typeof window.TadreebDB.courseTypeOf === 'function') {
+      return window.TadreebDB.courseTypeOf(c);
+    }
+    return (c && c.courseType === 'technical') ? 'technical' : 'admin';
+  }
+
+  function courseTypeLabel(ct) {
+    return ct === 'technical' ? 'تقني' : 'إداري';
+  }
+
+  // القاعات المطابقة لنوع دورة (مع قاعدة الرجوع الآمن: إن لم توجد
+  // قاعة من النوع المطابق أصلاً تُرجع كل القاعات — لا طريق مسدود).
+  // بلا نوع محدد (null) تُرجع كل القاعات دون تصفية.
+  function matchingHallsFor(halls, courseType) {
+    if (window.TadreebDB && typeof window.TadreebDB.matchingHalls === 'function') {
+      return window.TadreebDB.matchingHalls(halls, courseType);
+    }
+    var list = (halls || []).slice();
+    if (courseType == null || courseType === '') return list;
+    var want = courseType === 'technical' ? 'computer' : 'admin';
+    var typed = list.filter(function (x) { return typeOfHall(x) === want; });
+    return typed.length ? typed : list;
+  }
+
+  function courseTypeBadge(c) {
+    return typeOfCourse(c) === 'technical' ?
+      '<span class="pill pill-gold">تقني</span>' :
+      '<span class="pill pill-navy">إداري</span>';
+  }
+
   // خريطة إشغال القاعات من المتجر الحي: «date|periodId» ← {hallId: true}.
   // القواعد نفسها التي يستخدمها checkHallAvailability وتوليد الجدول:
   // الجلسة المجدولة (غير الملغاة ولا العطلة) والاجتماع العارض المجدول
@@ -718,8 +765,13 @@
     return !!(set && set[hallId]);
   }
 
-  function freeHallsFor(occupied, date, periodId) {
-    return App.Store.getAll('halls').slice().sort(byNameAsc).filter(function (h) {
+  // القاعات الحرة في موعد — مع نوع دورة محدد (v2.3 — W3) تُحسب
+  // قاعات النوع المطابق فقط (مع الرجوع إلى كل القاعات إن لم توجد
+  // قاعة من النوع المطابق أصلاً)؛ بلا نوع تُرجع كل القاعات الحرة
+  // كما قبل.
+  function freeHallsFor(occupied, date, periodId, courseType) {
+    var halls = matchingHallsFor(App.Store.getAll('halls').slice().sort(byNameAsc), courseType);
+    return halls.filter(function (h) {
       return !isHallOccupied(occupied, date, periodId, h.id);
     });
   }
@@ -728,7 +780,10 @@
   // القواعد نفسها التي يستخدمها buildHallOccupancy؛ الفرق أن كل قاعة
   // مشغولة تحمل اسم شاغلها: اسم الدورة للجلسة، أو «اجتماع: <العنوان>»
   // للاجتماع العارض — لتُعرض في تفاصيل الشريحة المحجوزة.
-  function buildHallOccupancyDetail(excludeCourseId) {
+  // (v2.3 — W3): مع نوع دورة محدد يُقتصر التفصيل على قاعات النوع
+  // المطابق (مع الرجوع إلى كل القاعات إن لم توجد قاعة مطابقة أصلاً)؛
+  // بلا نوع يبقى التفصيل كاملاً كما قبل.
+  function buildHallOccupancyDetail(excludeCourseId, courseType) {
     var detail = {};
     function mark(date, periodId, hallId, kind, label) {
       if (!date || !periodId || !hallId) return;
@@ -749,6 +804,15 @@
       if (m.status === 'cancelled') return;
       mark(m.date, m.periodId, m.hallId, 'meeting', 'اجتماع: ' + (m.title || ''));
     });
+    if (courseType != null && courseType !== '') {
+      var allowed = {};
+      matchingHallsFor(App.Store.getAll('halls'), courseType).forEach(function (h) { allowed[h.id] = true; });
+      Object.keys(detail).forEach(function (key) {
+        Object.keys(detail[key]).forEach(function (hallId) {
+          if (!allowed[hallId]) delete detail[key][hallId];
+        });
+      });
+    }
     return detail;
   }
 
@@ -760,10 +824,13 @@
     if (!rows.length) return 'لا قاعات مسجلة.';
     return rows.map(function (r) {
       var self = isSelfHall ? isSelfHall(r) : false;
+      // (v2.3) علامة المطابقة لنوع الدورة — تظهر فقط عندما يمرّر
+      // المستدعي نوع الدورة (preferred غير null).
+      var match = r.preferred ? ' <span class="pill pill-gold">مطابقة</span>' : '';
       if (r.free || self) {
-        return '<div>' + UI.escapeHtml(r.hallName) + ' <span class="pill pill-green">متاحة</span></div>';
+        return '<div>' + UI.escapeHtml(r.hallName) + match + ' <span class="pill pill-green">متاحة</span></div>';
       }
-      return '<div>' + UI.escapeHtml(r.hallName) + ' <span class="pill pill-red">مشغولة' +
+      return '<div>' + UI.escapeHtml(r.hallName) + match + ' <span class="pill pill-red">مشغولة' +
         (r.sessionCourse ? ' — ' + UI.escapeHtml(r.sessionCourse) : '') + '</span></div>';
     }).join('');
   }
@@ -778,6 +845,36 @@
   function calWeekday(dateStr) {
     var d = UI.parseDateStr(dateStr);
     return d ? d.getDay() : -1;
+  }
+
+  // أيام العطلة الأسبوعية (v2.3): الجمعة + السبت افتراضياً،
+  // وتُقرأ من الإعدادات عبر TadreebDB.getWeekendDays() إن وُجدت
+  // (عامل آخر يملك الإعداد) — وإلا يبقى الافتراضي [5، 6].
+  function calWeekendDays() {
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.getWeekendDays === 'function') {
+        var wd = window.TadreebDB.getWeekendDays();
+        if (Array.isArray(wd) && wd.length) return wd;
+      }
+    } catch (e) { /* الافتراضي أدناه */ }
+    return [5, 6];
+  }
+
+  function calIsWeekend(dateStr) {
+    return calWeekendDays().indexOf(calWeekday(dateStr)) !== -1;
+  }
+
+  // مفتاح الشهر «YYYY-MM» من تاريخ، وإزاحة شهر بمقدار معين.
+  function calMonthKey(dateStr) {
+    return dateStr ? String(dateStr).slice(0, 7) : null;
+  }
+
+  function calShiftMonth(monthKey, delta) {
+    var parts = String(monthKey || '').split('-');
+    if (parts.length !== 2) return calMonthKey(UI.todayStr());
+    var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1 + delta, 1);
+    var m = d.getMonth() + 1;
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m;
   }
 
   // ترتيب الجلسات المختارة زمنياً، ثم بترتيب الفترة داخل اليوم.
@@ -844,15 +941,19 @@
   // إنشاء جلسات الدورة الجديدة من اختيارات الرزنامة مباشرة — سجلات
   // الجلسات مطابقة لما ينتجه توليد الجدول (الحقول نفسها). القاعة
   // «تلقائي» تُحل إلى أول قاعة حرة (بالترتيب الأبجدي كما في المولّد)؛
+  // (v2.3 — W3): مع نوع دورة محدد تُحل إلى أول قاعة حرة من النوع
+  // المطابق (تقنية ← حاسوب، إدارية ← إدارية)، مع الرجوع إلى أي
+  // قاعة حرة إن لم توجد قاعة من النوع المطابق أصلاً. القاعة
+  // المختارة صراحةً لكل جلسة تُحترم كما هي (اختيار المستخدم يفوز).
   // إن لم توجد قاعة حرة تُنشأ الجلسة بلا قاعة وتُذكر في
   // unassignedHalls. العطل تُتخطى (لا يمكن اختيارها من الرزنامة
   // أصلاً؛ هذا فحص أخير). تُرجع Promise بنفس شكل نتيجة
   // generateSchedule لتُعرض في نافذة النتيجة نفسها.
-  function createPickedSessions(courseId, picks) {
+  function createPickedSessions(courseId, picks, courseType) {
     var holidays = {};
     App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
     var occupied = buildHallOccupancy(null);
-    var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
+    var halls = matchingHallsFor(App.Store.getAll('halls').slice().sort(byNameAsc), courseType);
     var result = { created: 0, skippedHolidays: 0, unassignedHalls: [] };
     var docs = [];
     sortPicks(picks || []).forEach(function (pick) {
@@ -907,6 +1008,8 @@
     var selectedTrainees = new Set((course && course.traineeIds) || []);
     var selectedDirectorates = new Set((course && course.directorateIds) || []);
     var selectedDays = new Set((course && course.days) || []);
+    // نوع الدورة (v2.3 — W3): دورة قديمة بلا نوع تُعامل كإدارية.
+    var courseTypeVal = course ? typeOfCourse(course) : 'admin';
 
     var trainees = Store.getAll('trainees').slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
@@ -932,28 +1035,38 @@
     var fields = '<div class="form-grid">' +
       '<div class="field field-full"><label>اسم الدورة *</label>' +
       '<input type="text" name="name" required value="' + UI.escapeHtml(course ? course.name : '') + '" placeholder="مثال: دورة إكسل"></div>' +
+      '<div class="field field-full"><label>اسم المجموعة المخصص (اختياري)</label>' +
+      '<input type="text" name="customName" value="' + UI.escapeHtml(course ? (course.customName || '') : '') + '" placeholder="مثال: مجموعة النخبة">' +
+      '<div class="field-hint">إن كتبت اسماً مخصصاً يظهر كاسم رئيسي للمجموعة، ويظهر الاسم التلقائي كسطر فرعي تحته. اتركه فارغاً لاستخدام الاسم التلقائي.</div>' +
+      '<div class="group-auto-preview" id="cf-auto-name-preview"></div></div>' +
       '<div class="field"><label>المعرّف *</label>' +
       '<input type="text" name="code" required value="' + UI.escapeHtml(course ? (course.code || App.displayCode(course, 'courses')) : App.nextCode('courses')) + '"></div>' +
       '<div class="field"><label>المدرب</label><select name="trainerId">' + trainerOptionsHtml(course ? course.trainerId : null) + '</select>' +
-      '<div class="field-hint">يمكن إنشاء الدورة بدون مدرب والتعاقد معه لاحقاً.</div></div>' +
+      '<div class="field-hint">يمكن إنشاء مجموعة التدريب بدون مدرب والتعاقد معه لاحقاً.</div></div>' +
       '<div class="field"><label>المجموعة</label><select name="groupId">' + groupOptionsHtml(course ? course.groupId : null) + '</select></div>' +
       '<div class="field"><label>المديرية المعيّنة</label><select name="directorateId">' + assignedDirectorateOptionsHtml(course ? course.directorateId : null) + '</select>' +
       '<div class="field-hint">تُملأ تلقائياً عند اختيار مجموعة، ويمكن تغييرها يدوياً.</div></div>' +
       '<div class="field"><label>المستوى</label><select name="level">' + levelOptionsHtml(course ? course.level : 'none') + '</select>' +
       '<div class="field-hint">المستويات المخصصة تُدار من إعدادات المنصة.</div></div>' +
+      '<div class="field"><label>نوع مجموعة التدريب</label><select name="courseType">' +
+      '<option value="admin"' + (courseTypeVal !== 'technical' ? ' selected' : '') + '>إداري</option>' +
+      '<option value="technical"' + (courseTypeVal === 'technical' ? ' selected' : '') + '>تقني</option></select>' +
+      '<div class="field-hint">مجموعات التدريب التقنية تُسند تلقائياً إلى قاعات الحاسوب، والإدارية إلى القاعات الإدارية.</div></div>' +
       '<div class="field"><label>عدد الجلسات *</label><input type="number" name="sessionCount" min="1" max="200" required value="' +
       UI.escapeHtml(course ? course.sessionCount : 20) + '"></div>' +
-      '<div class="field"><label>تاريخ بدء الدورة</label><input type="date" name="startDate" value="' +
+      '<div class="field"><label>عدد الجلسات أسبوعياً</label><input type="number" id="cf-per-week" name="sessionsPerWeek" min="1" max="7" value="">' +
+      '<div class="field-hint">للتعبئة الذكية الموجَّهة: تُوزَّع الجلسات على الأسابيع بهذا العدد (مثال: 20 جلسة بمعدل 3 أسبوعياً ≈ 7 أسابيع)، جلسة واحدة في اليوم كحد أقصى. اتركه فارغاً للتعبئة بأقرب موعد متاح.</div></div>' +
+      '<div class="field"><label>تاريخ بدء مجموعة التدريب</label><input type="date" name="startDate" value="' +
       UI.escapeHtml(isEdit ? (course.startDate || '') : UI.todayStr()) + '"></div>' +
-      '<div class="field"><label>ميزانية الدورة (ل.س)</label><input type="number" name="budget" min="0" step="1" value="' +
+      '<div class="field"><label>ميزانية مجموعة التدريب (ل.س)</label><input type="number" name="budget" min="0" step="1" value="' +
       UI.escapeHtml(course ? (course.budget || 0) : 0) + '"></div>' +
-      (isEdit ? '<div class="field"><label>حالة الدورة</label><select name="status">' +
+      (isEdit ? '<div class="field"><label>حالة مجموعة التدريب</label><select name="status">' +
         Object.keys(UI.COURSE_STATUS_LABELS).map(function (k) {
           return '<option value="' + k + '"' + (course.status === k ? ' selected' : '') + '>' + UI.COURSE_STATUS_LABELS[k] + '</option>';
         }).join('') + '</select></div>' : '') +
       '<div class="field field-full"><label>الأيام الأسبوعية المفضلة</label><div class="day-picker">' + dayBoxes + '</div>' +
       '<div class="field-hint">تُستخدم لحساب مدة الرزنامة أدناه — ويمكنك اختيار جلسات في أي يوم من الرزنامة.</div></div>' +
-      '<div class="field field-full"><label>رزنامة جلسات الدورة *</label>' +
+      '<div class="field field-full"><label>رزنامة جلسات مجموعة التدريب *</label>' +
       '<div id="cf-cal-summary" style="font-weight:600;margin-bottom:8px"></div>' +
       '<div id="cf-cal-warnings" hidden></div>' +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
@@ -976,8 +1089,8 @@
       '<div id="cf-calendar" style="max-height:50vh;overflow-y:auto"></div>' +
       '<div style="margin-top:10px"><button type="button" class="btn btn-outline btn-sm" id="cf-cal-more">إظهار أسابيع إضافية</button></div>' +
       '<div class="field-hint">' + (isEdit ?
-        'الجلسات الحالية محددة مسبقاً. تغيير التحديد هنا يحدّث أيام الدورة وفترتها فقط — لإضافة جلسة أو حذفها استخدم جدول الجلسات في تفاصيل الدورة.' :
-        'انقر على فترة في أي يوم لاختيارها جلسةً في الدورة — ويمكنك اختيار أكثر من فترة في اليوم الواحد. أيام العطل بلا جلسات.') + '</div></div>' +
+        'الجلسات الحالية محددة مسبقاً — انقر على يوم في الرزنامة لعرض فتراته. تغيير التحديد هنا يحدّث أيام مجموعة التدريب وفترتها فقط — لإضافة جلسة أو حذفها استخدم جدول الجلسات في تفاصيل مجموعة التدريب.' :
+        'انقر على يوم في الرزنامة لعرض فتراته، ثم انقر على فترة لاختيارها جلسةً في مجموعة التدريب — ويمكنك اختيار أكثر من فترة في اليوم الواحد. أيام العطل والعطلة الأسبوعية بلا جلسات.') + '</div></div>' +
       '<div class="field field-full"><label>المديريات</label><div id="cf-directorate-list">' +
       (dirRows ? '<div class="check-list">' + dirRows + '</div>' : '<div class="muted">لا مديريات مسجلة — أضف مديرية من قائمة «المديرية المعيّنة» أعلاه.</div>') + '</div></div>' +
       '<div class="field field-full"><label>المتدربون</label>' +
@@ -985,13 +1098,18 @@
       '<input type="text" class="check-list-search" id="cf-trainee-search" placeholder="ابحث بالاسم…">' +
       (traineeRows ? '<div class="check-list" id="cf-trainee-list">' + traineeRows + '</div>' :
         '<div class="muted">لا متدربين مسجلين — أضف متدرباً جديداً أدناه.</div>') +
+      '<div class="excel-import" id="cf-excel-import">' +
+      '<input type="file" id="cf-excel-file" accept=".xlsx" hidden>' +
+      '<button type="button" class="btn btn-outline btn-sm" id="cf-excel-btn">إضافة من Excel</button>' +
+      '<div class="field-hint">ملف ‎.xlsx: العمود الأول اسم المتدرب والثاني رقم هاتفه. تُترك المديرية فارغة ويمكن تعديلها لاحقاً من بطاقة المتدرب.</div>' +
+      '<div id="cf-excel-summary" class="excel-import-summary" hidden></div></div>' +
       '<div class="inline-add"><h3>إضافة متدرب جديد</h3><div class="form-grid">' +
       '<div class="field"><label>الاسم</label><input type="text" name="newTraineeName" placeholder="اسم المتدرب"></div>' +
       '<div class="field"><label>المديرية</label><select name="newTraineeDirectorate"><option value="">اختر المديرية</option>' +
-      directorates.map(function (d) { return '<option value="' + UI.escapeHtml(d.id) + '">' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>'; }).join('') + '</select></div>' +
+      directorates.map(function (d) { return '<option value="' + UI.escapeHtml(d.id) + '">' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>'; }).join('') + '<option value="__new__">إضافة مديرية جديدة +</option></select></div>' +
       '<div class="field"><label>رقم الهاتف</label><input type="text" name="newTraineePhone" placeholder="رقم الهاتف"></div>' +
       '<div class="field"><label>ملاحظات</label><input type="text" name="newTraineeNotes" placeholder="ملاحظات أخرى (اختياري)"></div>' +
-      '</div><div class="field-hint">إن كتبت اسماً هنا، سيُضاف المتدرب الجديد إلى الدورة تلقائياً.</div></div>' +
+      '</div><div class="field-hint">إن كتبت اسماً هنا، سيُضاف المتدرب الجديد إلى مجموعة التدريب تلقائياً.</div></div>' +
       '</div>' +
       '<div class="field field-full" id="cf-new-trainer" hidden><div class="inline-add"><h3>مدرب جديد</h3><div class="form-grid">' +
       '<div class="field"><label>اسم المدرب</label><input type="text" name="newTrainerName" placeholder="اسم المدرب"></div>' +
@@ -1000,9 +1118,9 @@
       '</div></div></div>' +
       '</div>';
 
-    var modal = UI.openFormModal(isEdit ? 'تعديل الدورة' : 'دورة جديدة', fields, function (form, close, submitBtn) {
+    var modal = UI.openFormModal(isEdit ? 'تعديل مجموعة التدريب' : 'مجموعة تدريب جديدة', fields, function (form, close, submitBtn) {
       submitCourseForm(form, close, submitBtn, course, isEdit, calPicksList());
-    }, { submitLabel: isEdit ? 'حفظ التعديلات' : 'إنشاء الدورة وتوليد الجدول', width: 'xwide' });
+    }, { submitLabel: isEdit ? 'حفظ التعديلات' : 'إنشاء مجموعة التدريب وتوليد الجدول', width: 'xwide' });
 
     // تفاعلات النموذج
     var card = modal.element;
@@ -1031,10 +1149,16 @@
           cfTraineeList.style.opacity = grouped ? '0.5' : '';
         }
         if (cfTraineeSearch) cfTraineeSearch.disabled = grouped;
+        // الاستيراد من إكسل يضيف إلى قائمة الدورة — يُعطَّل معها
+        // عند تعيين مجموعة (أعضاء المجموعة هم المستخدمون).
+        var cfExcelBtn = card.querySelector('#cf-excel-btn');
+        if (cfExcelBtn) cfExcelBtn.disabled = grouped;
+        var cfExcelBlock = card.querySelector('#cf-excel-import');
+        if (cfExcelBlock) cfExcelBlock.style.opacity = grouped ? '0.5' : '';
         if (cfGroupHint) {
           if (grouped) {
             var n = (g.traineeIds || []).length;
-            cfGroupHint.textContent = 'هذه الدورة معيّنة لمجموعة — سيُستخدم أعضاء المجموعة في التفقد والتصدير' +
+            cfGroupHint.textContent = 'مجموعة التدريب هذه معيّنة لمجموعة — سيُستخدم أعضاء المجموعة في التفقد والتصدير' +
               (n ? ' (' + n + ' عضواً)' : '');
             cfGroupHint.hidden = false;
           } else {
@@ -1056,6 +1180,7 @@
               prevAssignedDirValue = ng.directorateId;
             }
             syncGroupTrainees();
+            refreshAutoNamePreview();
           }, function () {
             groupSelect.value = prevGroupValue;
           });
@@ -1081,11 +1206,48 @@
           refreshDirectorySelects();
           assignedDirSelect.value = newId;
           prevAssignedDirValue = newId;
+          refreshAutoNamePreview();
         }, function () {
           assignedDirSelect.value = prevAssignedDirValue;
         });
       });
       syncGroupTrainees();
+    }
+    // معاينة الاسم التلقائي لمجموعة التدريب (v2.3 — N): تُحدَّث عند
+    // تغيير اسم الدورة أو المديرية المعيّنة؛ الرقم هو رقم المجموعة
+    // الحالية عند التعديل، والرقم التالي عند الإنشاء.
+    var cfNameInput = card.querySelector('[name="name"]');
+    var cfAutoPreview = card.querySelector('#cf-auto-name-preview');
+    function refreshAutoNamePreview() {
+      if (!cfAutoPreview) return;
+      var nm = cfNameInput ? cfNameInput.value.trim() : '';
+      var dirSel = card.querySelector('select[name="directorateId"]');
+      var dirId = dirSel ? dirSel.value : '';
+      var dirName = (dirId && dirId !== '__new__') ? (App.directorateName(dirId) || '') : '';
+      var num = isEdit ? App.groupNumber(course) : App.nextGroupNumber();
+      cfAutoPreview.innerHTML = 'الاسم التلقائي: <strong>' + UI.escapeHtml('مجموعة تدريب ' + num + ' — ' + (dirName || 'بلا مديرية') + ' — ' + (nm || '…')) + '</strong>';
+    }
+    if (cfNameInput) cfNameInput.addEventListener('input', refreshAutoNamePreview);
+    if (assignedDirSelect) assignedDirSelect.addEventListener('change', refreshAutoNamePreview);
+    if (groupSelect) groupSelect.addEventListener('change', function () { setTimeout(refreshAutoNamePreview, 0); });
+    refreshAutoNamePreview();
+    // إضافة مديرية جديدة من حقل مديرية المتدرب الجديد (v2.3 — N):
+    // خيار «إضافة مديرية جديدة +» يفتح الإضافة السريعة، ثم تُحدَّث
+    // قوائم المديريات ويُختار الجديد في حقل المتدرب.
+    var ntDirSel = card.querySelector('[name="newTraineeDirectorate"]');
+    if (ntDirSel) {
+      var prevNtDirValue = '';
+      ntDirSel.addEventListener('change', function () {
+        if (ntDirSel.value !== '__new__') { prevNtDirValue = ntDirSel.value; return; }
+        openQuickAddModal('directorate', function (newId) {
+          refreshDirectorySelects();
+          var sel = card.querySelector('[name="newTraineeDirectorate"]');
+          if (sel) { sel.value = newId; prevNtDirValue = newId; }
+          refreshAutoNamePreview();
+        }, function () {
+          ntDirSel.value = prevNtDirValue;
+        });
+      });
     }
     var search = card.querySelector('#cf-trainee-search');
     var list = card.querySelector('#cf-trainee-list');
@@ -1094,6 +1256,73 @@
         var q = search.value.trim();
         list.querySelectorAll('[data-trainee-row]').forEach(function (row) {
           row.style.display = !q || row.getAttribute('data-trainee-row').indexOf(q) !== -1 ? '' : 'none';
+        });
+      });
+    }
+
+    // ---------- استيراد المتدربين من إكسل (v2.3 — M) ----------
+    // يعيد رسم قائمة المتدربين من المتجر الحي مع الحفاظ على المحدد
+    // وتحديد المستوردين الجدد؛ ينشئ القائمة إن لم تكن موجودة
+    // (لا متدربين عند فتح النموذج).
+    function refreshCfTraineeList(extraCheckedIds) {
+      var traineeList = card.querySelector('#cf-trainee-list');
+      var checked = new Set();
+      if (traineeList) {
+        traineeList.querySelectorAll('[data-trainee-id]:checked').forEach(function (cb) {
+          checked.add(cb.getAttribute('data-trainee-id'));
+        });
+      }
+      (extraCheckedIds || []).forEach(function (id) { checked.add(id); });
+      var all = App.Store.getAll('trainees').slice().sort(function (a, b) {
+        return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+      });
+      var rowsHtml = all.map(function (t) {
+        return '<label class="check-row" data-trainee-row="' + UI.escapeHtml(t.name) + '">' +
+          '<input type="checkbox" data-trainee-id="' + UI.escapeHtml(t.id) + '"' +
+          (checked.has(t.id) ? ' checked' : '') + '> ' + UI.escapeHtml(t.name) +
+          ' <span class="muted">(' + UI.escapeHtml(App.displayCode(t, 'trainees')) + ' · ' + UI.escapeHtml(App.directorateName(t.directorateId) || 'بلا مديرية') + ')</span></label>';
+      }).join('');
+      if (!traineeList) {
+        var importBlock = card.querySelector('#cf-excel-import');
+        var emptyNote = importBlock ? importBlock.previousElementSibling : null;
+        if (emptyNote && emptyNote.classList.contains('muted')) emptyNote.remove();
+        traineeList = document.createElement('div');
+        traineeList.className = 'check-list';
+        traineeList.id = 'cf-trainee-list';
+        if (importBlock && importBlock.parentNode) importBlock.parentNode.insertBefore(traineeList, importBlock);
+        else return;
+      }
+      traineeList.innerHTML = rowsHtml;
+      // إعادة تطبيق حالة المجموعة (التعطيل) والبحث الحالي.
+      if (typeof syncGroupTrainees === 'function') syncGroupTrainees();
+      var q = search ? search.value.trim() : '';
+      if (q) {
+        traineeList.querySelectorAll('[data-trainee-row]').forEach(function (rowEl) {
+          rowEl.style.display = rowEl.getAttribute('data-trainee-row').indexOf(q) !== -1 ? '' : 'none';
+        });
+      }
+    }
+    var cfExcelBtn = card.querySelector('#cf-excel-btn');
+    var cfExcelFile = card.querySelector('#cf-excel-file');
+    var cfExcelSummary = card.querySelector('#cf-excel-summary');
+    if (cfExcelBtn && cfExcelFile && UI.runTraineeExcelImport) {
+      cfExcelBtn.addEventListener('click', function () { cfExcelFile.click(); });
+      cfExcelFile.addEventListener('change', function () {
+        var file = cfExcelFile.files && cfExcelFile.files[0];
+        cfExcelFile.value = '';
+        if (!file) return;
+        UI.runTraineeExcelImport(file, {
+          summaryEl: cfExcelSummary,
+          buttonEl: cfExcelBtn,
+          existingPhones: function () {
+            var phones = [];
+            card.querySelectorAll('[data-trainee-id]:checked').forEach(function (cb) {
+              var t = App.Store.get('trainees', cb.getAttribute('data-trainee-id'));
+              if (t && t.phone) phones.push(t.phone);
+            });
+            return phones;
+          },
+          onAdded: function (newIds) { refreshCfTraineeList(newIds); }
         });
       });
     }
@@ -1127,6 +1356,7 @@
           html += '<option value="' + UI.escapeHtml(d.id) + '"' + (d.id === cur ? ' selected' : '') + '>' +
             UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
         });
+        html += '<option value="__new__">إضافة مديرية جديدة +</option>';
         ntSel.innerHTML = html;
         ntSel.value = cur;
       }
@@ -1165,6 +1395,10 @@
     var calOccupiedDetail = {};
     var calFreeOnly = false;
     var calDetailKey = null;
+    // شبكة الرزنامة (v2.3): الشهر المعروض «YYYY-MM» + اليوم المفتوح
+    // (لوحة الفترات أسفل الشبكة) — null تعني لا لوحة مفتوحة.
+    var calGridMonth = null;
+    var calExpandedDate = null;
     if (isEdit) {
       App.sessionsForCourse(course.id).forEach(function (s) {
         if (s.state === 'cancelled' || s.state === 'holiday') return;
@@ -1189,6 +1423,23 @@
       return el ? (parseInt(el.value, 10) || 0) : 0;
     }
 
+    // الجلسات المطلوبة أسبوعياً للتعبئة الموجَّهة (v2.3): 0 تعني
+    // «فارغ/غير صالح» فيُستخدم سلوك v2.2 (التعبئة بأقرب موعد).
+    function calPerWeekVal() {
+      var el = card.querySelector('#cf-per-week');
+      if (!el) return 0;
+      var v = parseInt(el.value, 10);
+      return (isFinite(v) && v >= 1) ? v : 0;
+    }
+
+    // نوع الدورة (v2.3): يُقرأ من حقل النوع في النموذج إن وُجد
+    // (عامل آخر يضيف الحقل) — وإلا تُعامل الدورة كإدارية.
+    // مطابقة القاعات حسب النوع داخل calSlotState (عامل آخر يملكها).
+    function calCourseTypeVal() {
+      var el = card.querySelector('[name="courseType"]') || card.querySelector('select[name="type"]');
+      return (el && el.value) || 'admin';
+    }
+
     function calStartDateVal() {
       var el = card.querySelector('[name="startDate"]');
       return (el && el.value) || UI.todayStr();
@@ -1207,6 +1458,10 @@
     // تلقائي: متاح إن كانت كل القاعات حرة، محجوز إن لم توجد حرة،
     // جزئي بينهما. قاعة محددة: متاح/محجوز حسب تلك القاعة وحدها.
     // بلا قاعات مسجلة أصلاً: كل موعد متاح (الجلسات تُنشأ بلا قاعة).
+    // (v2.3 — W3): مع القاعة التلقائية تُحسب قاعات نوع الدورة
+    // المطابق فقط (تقنية ← حاسوب، إدارية ← إدارية)، مع الرجوع إلى
+    // كل القاعات إن لم توجد قاعة من النوع المطابق أصلاً. القاعة
+    // المحددة صراحةً تفوز على النوع (اختيار المستخدم).
     function calSlotState(date, periodId) {
       var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
       if (!halls.length) return { state: 'free', freeCount: 0, total: 0, freeHalls: [], busyHalls: [] };
@@ -1218,11 +1473,13 @@
           freeHalls: busy ? [] : [defHall], busyHalls: busy ? [defHall] : []
         };
       }
-      var freeHalls = freeHallsFor(calOccupied, date, periodId);
+      var courseType = calCourseTypeVal();
+      var typedHalls = matchingHallsFor(halls, courseType);
+      var freeHalls = freeHallsFor(calOccupied, date, periodId, courseType);
       var freeIds = freeHalls.map(function (h) { return h.id; });
-      var busyHalls = halls.filter(function (h) { return freeIds.indexOf(h.id) === -1; }).map(function (h) { return h.id; });
-      var state = freeIds.length === halls.length ? 'free' : (freeIds.length === 0 ? 'busy' : 'partial');
-      return { state: state, freeCount: freeIds.length, total: halls.length, freeHalls: freeIds, busyHalls: busyHalls };
+      var busyHalls = typedHalls.filter(function (h) { return freeIds.indexOf(h.id) === -1; }).map(function (h) { return h.id; });
+      var state = freeIds.length === typedHalls.length ? 'free' : (freeIds.length === 0 ? 'busy' : 'partial');
+      return { state: state, freeCount: freeIds.length, total: typedHalls.length, freeHalls: freeIds, busyHalls: busyHalls };
     }
 
     // نص حالة الشريحة: «✓ متاح» / «✕ محجوز» / «2 من 3 حرة».
@@ -1244,8 +1501,10 @@
     // تفاصيل إشغال موعد: حالة كل قاعة (حرة/مشغولة وبمن) + زر اختيار
     // صريح للموعد المحجوز (يُنشئ الجلسة بلا قاعة إن لم توجد حرة —
     // السلوك اليدوي السابق نفسه، لكن بقرار صريح بعد رؤية السبب).
+    // (v2.3 — W3): تُعرض قاعات نوع الدورة المطابق فقط (مع الرجوع
+    // إلى كل القاعات إن لم توجد قاعة مطابقة أصلاً).
     function calSlotDetailHtml(date, periodId) {
-      var halls = App.Store.getAll('halls').slice().sort(byNameAsc);
+      var halls = matchingHallsFor(App.Store.getAll('halls').slice().sort(byNameAsc), calCourseTypeVal());
       var det = calOccupiedDetail[date + '|' + periodId] || {};
       var rows = halls.map(function (h) {
         var occ = det[h.id];
@@ -1307,39 +1566,51 @@
       return Math.min(52, Math.floor(diff / 7) + 1);
     }
 
-    // مواعيد مرشحة للتعبئة: من تاريخ البدء، أسبوعاً أسبوعاً حتى
-    // capWeeks. daysFilter اختياري (أيام أسبوع مسموحة). تُستثنى
-    // العطل والاختيارات الحالية والمواعيد المحجوزة كلياً (حسب
-    // القاعة الافتراضية). داخل اليوم تُفضَّل فترة النمط (أكثر فترة
+    // مواعيد مرشحة للتعبئة في أسبوع واحد يبدأ من weekStart
+    // (7 أيام). daysFilter اختياري (أيام أسبوع مسموحة). تُستثنى
+    // العطل وأيام العطلة الأسبوعية والاختيارات الحالية والمواعيد
+    // المحجوزة كلياً (حسب القاعة الافتراضية — ونوع الدورة داخل
+    // calSlotState). داخل اليوم تُفضَّل فترة النمط (أكثر فترة
     // مختارة) ثم ترتيب الفترات. onePerDay: موعد واحد في اليوم فقط
     // (ويتخطى اليوم الذي فيه اختيار حالي). تُرجع قائمة مرتبة زمنياً.
-    function calFillCandidates(daysFilter, capWeeks, patternPeriodId, onePerDay) {
+    function calWeekCandidates(weekStart, daysFilter, patternPeriodId, onePerDay) {
       var holidays = {};
       App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
       var periods = sortedPeriods();
+      var out = [];
+      for (var i = 0; i < 7; i++) {
+        var date = calAddDays(weekStart, i);
+        if (!date || holidays[date]) continue;
+        if (calIsWeekend(date)) continue;
+        if (daysFilter && daysFilter.indexOf(calWeekday(date)) === -1) continue;
+        if (onePerDay && periods.some(function (p) { return !!calPicks[date + '|' + p.id]; })) continue;
+        var dayPeriods = periods.slice().sort(function (a, b) {
+          var ap = patternPeriodId && a.id === patternPeriodId ? 0 : 1;
+          var bp = patternPeriodId && b.id === patternPeriodId ? 0 : 1;
+          if (ap !== bp) return ap - bp;
+          return (a.order || 0) - (b.order || 0);
+        });
+        var taken = false;
+        dayPeriods.forEach(function (p) {
+          if (onePerDay && taken) return;
+          if (calPicks[date + '|' + p.id]) return;
+          if (calSlotState(date, p.id).state === 'busy') return;
+          out.push({ date: date, periodId: p.id });
+          taken = true;
+        });
+      }
+      return out;
+    }
+
+    // مواعيد مرشحة للتعبئة: من تاريخ البدء، أسبوعاً أسبوعاً حتى
+    // capWeeks — تجميع calWeekCandidates أسبوعاً بعد أسبوع.
+    function calFillCandidates(daysFilter, capWeeks, patternPeriodId, onePerDay) {
       var startDate = calStartDateVal();
       var out = [];
       for (var w = 0; w < capWeeks; w++) {
-        for (var i = 0; i < 7; i++) {
-          var date = calAddDays(startDate, w * 7 + i);
-          if (!date || holidays[date]) continue;
-          if (daysFilter && daysFilter.indexOf(calWeekday(date)) === -1) continue;
-          if (onePerDay && periods.some(function (p) { return !!calPicks[date + '|' + p.id]; })) continue;
-          var dayPeriods = periods.slice().sort(function (a, b) {
-            var ap = patternPeriodId && a.id === patternPeriodId ? 0 : 1;
-            var bp = patternPeriodId && b.id === patternPeriodId ? 0 : 1;
-            if (ap !== bp) return ap - bp;
-            return (a.order || 0) - (b.order || 0);
-          });
-          var taken = false;
-          dayPeriods.forEach(function (p) {
-            if (onePerDay && taken) return;
-            if (calPicks[date + '|' + p.id]) return;
-            if (calSlotState(date, p.id).state === 'busy') return;
-            out.push({ date: date, periodId: p.id });
-            taken = true;
-          });
-        }
+        var weekStart = calAddDays(startDate, w * 7);
+        if (!weekStart) break;
+        out = out.concat(calWeekCandidates(weekStart, daysFilter, patternPeriodId, onePerDay));
       }
       return out;
     }
@@ -1350,11 +1621,19 @@
       if (noteEl) { noteEl.textContent = text; noteEl.hidden = false; }
     }
 
-    // التعبئة الذكية: تملأ الجلسات المتبقية بأقرب المواعيد المتاحة،
-    // بالترتيب: (أ) الأيام المفضلة المحددة في النموذج (أو أيام
-    // الاختيارات الحالية إن لم تُحدد) — موعد واحد في اليوم؛ (ب) ثم
-    // فترات إضافية في الأيام نفسها؛ (ج) ثم أي يوم متاح. تُمدَّد
-    // الرزنامة تلقائياً حتى 52 أسبوعاً. لا تختار موعداً محجوزاً أبداً.
+    // التعبئة الذكية الموجَّهة (v2.3): مدخلاتها عدد الجلسات الكلي
+    // + الجلسات أسبوعياً + الأيام المفضلة (مربعات النموذج نفسها)
+    // + نوع الدورة (التوفر حسب النوع داخل calSlotState).
+    // مع عدد أسبوعي صالح: تُوزَّع الجلسات على الأسابيع بمعدل
+    // perWeek كحد أقصى في كل أسبوع، على الأيام المختارة فقط،
+    // أسبوعاً أسبوعاً من تاريخ البدء — جلسة واحدة في اليوم كحد
+    // أقصى (أمر بدر 01:41: التوزيع التلقائي لا يضع جلستين في
+    // اليوم نفسه أبداً؛ الحصة غير المغطاة تُرحَّل لأسابيع لاحقة)
+    // — وتُخصم الجلسات الموجودة أصلاً في كل أسبوع من حصته. بلا
+    // عدد أسبوعي: أقرب المواعيد المتاحة (جلسة واحدة في اليوم
+    // أيضاً). تُتخطى العطل والعطلة الأسبوعية والمواعيد المحجوزة
+    // كلياً دائماً. بعد التعبئة يُعرض شهر أول جلسة مختارة ويُفتح
+    // يومها.
     function calSmartFill() {
       var sc = calSessionCountVal();
       if (sc <= 0) { calShowSmartNote('حدّد عدد الجلسات المطلوب أولاً.'); return; }
@@ -1362,6 +1641,8 @@
       if (remaining <= 0) { calShowSmartNote('اكتمل العدد المطلوب — لا جلسات متبقية.'); return; }
       if (!sortedPeriods().length) { calShowSmartNote('لا فترات تدريبية معرّفة — أضف فترة من إعدادات المنصة أولاً.'); return; }
       var picks = calPicksList();
+      var courseType = calCourseTypeVal();
+      void courseType; // يُقرأ هنا توثيقاً للتدفق الموجَّه؛ المطابقة داخل calSlotState.
       var patternPeriodId = null;
       if (picks.length) {
         var counts = {};
@@ -1376,6 +1657,7 @@
         dayFilter = Object.keys(wdSet).map(function (k) { return parseInt(k, 10); });
       }
       if (!dayFilter.length) dayFilter = null;
+      var perWeek = calPerWeekVal();
       var chosen = [];
       var seen = {};
       function take(cands) {
@@ -1384,9 +1666,36 @@
           if (!seen[k]) { seen[k] = true; chosen.push(cands[i]); }
         }
       }
-      if (dayFilter) take(calFillCandidates(dayFilter, 52, patternPeriodId, true));
-      if (chosen.length < remaining && dayFilter) take(calFillCandidates(dayFilter, 52, patternPeriodId, false));
-      if (chosen.length < remaining) take(calFillCandidates(null, 52, patternPeriodId, false));
+      function takeUpTo(cands, n) {
+        var added = 0;
+        for (var i = 0; i < cands.length && added < n && chosen.length < remaining; i++) {
+          var k = cands[i].date + '|' + cands[i].periodId;
+          if (!seen[k]) { seen[k] = true; chosen.push(cands[i]); added++; }
+        }
+        return added;
+      }
+      if (perWeek > 0) {
+        var startDate = calStartDateVal();
+        for (var w = 0; w < 52 && chosen.length < remaining; w++) {
+          var weekStart = calAddDays(startDate, w * 7);
+          if (!weekStart) break;
+          var weekEnd = calAddDays(weekStart, 6);
+          var existing = 0;
+          picks.forEach(function (p) { if (p.date >= weekStart && p.date <= weekEnd) existing++; });
+          chosen.forEach(function (c) { if (c.date >= weekStart && c.date <= weekEnd) existing++; });
+          var quota = perWeek - existing;
+          if (quota <= 0) continue;
+          // جلسة واحدة في اليوم كحد أقصى (v2.3 — أمر بدر 01:41):
+          // لا تمريرة ثانية بفترات إضافية في اليوم نفسه؛ الحصة
+          // غير المغطاة تُرحَّل إلى أسابيع لاحقة تلقائياً.
+          takeUpTo(calWeekCandidates(weekStart, dayFilter, patternPeriodId, true), quota);
+        }
+      } else {
+        // جلسة واحدة في اليوم كحد أقصى (v2.3) في كل التمريرات —
+        // بما فيها تمريرة «أي يوم» الأخيرة.
+        if (dayFilter) take(calFillCandidates(dayFilter, 52, patternPeriodId, true));
+        if (chosen.length < remaining) take(calFillCandidates(null, 52, patternPeriodId, true));
+      }
       var defHall = calDefaultHallVal();
       chosen.forEach(function (c) {
         calPicks[c.date + '|' + c.periodId] = { date: c.date, periodId: c.periodId, hallId: defHall };
@@ -1395,9 +1704,13 @@
       if (chosen.length) weeksNeeded = calWeeksForDate(chosen[chosen.length - 1].date);
       var extended = false;
       if (weeksNeeded > calWeeksShown) { calWeeksShown = Math.min(52, weeksNeeded); extended = true; }
+      if (chosen.length) { calGridMonth = chosen[0].date.slice(0, 7); calExpandedDate = chosen[0].date; }
       renderCalendar(false);
       var left = sc - calPicksList().length;
       var msg = 'تم اختيار ' + chosen.length + ' جلسة' + (left > 0 ? ' — متبقّي ' + left : ' — اكتمل العدد');
+      if (perWeek > 0 && dayFilter && perWeek > dayFilter.length) {
+        msg += ' — جلسة واحدة في اليوم كحد أقصى (' + dayFilter.length + ' أيام مفضلة)';
+      }
       if (extended) msg += ' (تم تمديد الرزنامة إلى ' + calWeeksShown + ' أسبوعاً)';
       if (left > 0) msg += ' — لا توجد فترات حرة كافية ضمن 52 أسبوعاً.';
       calShowSmartNote(msg);
@@ -1405,7 +1718,9 @@
 
     // إكمال النمط: يملأ الجلسات المتبقية بمواعيد النمط المكتشف فقط
     // (أيام + فترة النمط)، المتاحة منها فقط، بدءاً من أسبوع أول
-    // اختيار (لا يعود إلى أسابيع قبل ما اختاره المستخدم).
+    // اختيار (لا يعود إلى أسابيع قبل ما اختاره المستخدم) — مع تخطي
+    // الأيام التي لها اختيار على أي فترة (جلسة واحدة في اليوم كحد
+    // أقصى في التوزيع التلقائي).
     function calCompletePattern() {
       var pattern = calDetectPattern();
       if (!pattern) return;
@@ -1423,9 +1738,14 @@
         for (var i = 0; i < 7 && chosen.length < remaining; i++) {
           var date = calAddDays(baseWeekStart, w * 7 + i);
           if (!date || holidays[date]) continue;
+          if (calIsWeekend(date)) continue;
           if (pattern.weekdays.indexOf(calWeekday(date)) === -1) continue;
           var key = date + '|' + pattern.periodId;
           if (calPicks[key]) continue;
+          // جلسة واحدة في اليوم كحد أقصى (v2.3): إن كان لليوم اختيار
+          // على فترة أخرى يُتخطى كله — التوزيع التلقائي لا يضيف جلسة
+          // ثانية في اليوم نفسه أبداً (الاختيار اليدوي غير مقيّد).
+          if (sortedPeriods().some(function (p) { return !!calPicks[date + '|' + p.id]; })) continue;
           if (calSlotState(date, pattern.periodId).state === 'busy') continue;
           chosen.push({ date: date, periodId: pattern.periodId });
         }
@@ -1438,6 +1758,7 @@
       if (chosen.length) weeksNeeded = calWeeksForDate(chosen[chosen.length - 1].date);
       var extended = false;
       if (weeksNeeded > calWeeksShown) { calWeeksShown = Math.min(52, weeksNeeded); extended = true; }
+      if (chosen.length) { calGridMonth = chosen[0].date.slice(0, 7); calExpandedDate = chosen[0].date; }
       renderCalendar(false);
       var left = sc - calPicksList().length;
       var msg = 'تم إكمال النمط: أُضيفت ' + chosen.length + ' جلسة' + (left > 0 ? ' — متبقّي ' + left : ' — اكتمل العدد');
@@ -1483,7 +1804,7 @@
           UI.escapeHtml(HALL_CONFLICT_WARNING + ' (' + (App.hallName(pick.hallId) || '') + '، ' +
             UI.fmtDateFull(pick.date) + '، ' + App.periodLabel(pick.periodId) + ')') + '</div>';
       }
-      if (!pick.hallId && !freeHallsFor(calOccupied, pick.date, pick.periodId).length) {
+      if (!pick.hallId && !freeHallsFor(calOccupied, pick.date, pick.periodId, calCourseTypeVal()).length) {
         return '<div class="cf-nohall-note muted" style="margin-top:6px">لا توجد قاعة حرة في هذا الموعد — ستُنشأ الجلسة بلا قاعة.</div>';
       }
       return '';
@@ -1500,35 +1821,136 @@
         '</div>';
     }
 
-    function calDayRowHtml(date, periods, holidays, today) {
+    // ---------- شبكة الرزنامة الشهرية (v2.3) ----------
+    // توفر يوم كامل من حالات فتراته (v2.2): free (كل الفترات
+    // متاحة) / partial / busy (كلها محجوزة) / holiday / weekend /
+    // none (بلا فترات معرّفة). dots: حالة كل فترة للنقاط في الخلية.
+    function calDayAvail(date, periods, holidays) {
+      if (holidays[date]) return { state: 'holiday', dots: [], freeCount: 0, pickCount: 0 };
+      if (calIsWeekend(date)) return { state: 'weekend', dots: [], freeCount: 0, pickCount: 0 };
+      if (!periods.length) return { state: 'none', dots: [], freeCount: 0, pickCount: 0 };
+      var dots = [];
+      var freeCount = 0;
+      var pickCount = 0;
+      var allFree = true;
+      var allBusy = true;
+      periods.forEach(function (p) {
+        var st = calSlotState(date, p.id).state;
+        dots.push(st);
+        if (st !== 'busy') freeCount++;
+        if (st !== 'free') allFree = false;
+        if (st !== 'busy') allBusy = false;
+        if (calPicks[date + '|' + p.id]) pickCount++;
+      });
+      // حالة الخلية صارمة: «متاح» فقط إن كانت كل الفترات متاحة
+      // بالكامل (الجزئي يجعل اليوم جزئياً)؛ أما freeCount فيبقي
+      // على قاعدة v2.2 (الجزئي يُحسب متاحاً) لنص ملخص اليوم.
+      var state = allFree ? 'free' : (allBusy ? 'busy' : 'partial');
+      return { state: state, dots: dots, freeCount: freeCount, pickCount: pickCount };
+    }
+
+    // محتوى خلية اليوم: رقم اليوم + نقاط الفترات + شارة الاختيارات.
+    function calDayCellInner(dayNum, info) {
+      var html = '<span class="cf-day-num">' + dayNum + '</span>';
+      if (info.state === 'holiday') {
+        html += '<span class="cf-day-tag">عطلة</span>';
+      } else if (info.state === 'weekend') {
+        html += '<span class="cf-day-tag">عطلة</span>';
+      } else if (info.dots.length) {
+        html += '<span class="cf-day-dots">' + info.dots.map(function (s) {
+          return '<span class="cf-dot cf-dot-' + s + '"></span>';
+        }).join('') + '</span>';
+      }
+      if (info.pickCount) {
+        html += '<span class="cf-day-pickcount">' + info.pickCount + ' ✓</span>';
+      }
+      return html;
+    }
+
+    function calDayCellClass(date, info, today) {
+      var cls = 'cf-grid-day cf-day-' + info.state;
+      if (date === today) cls += ' cf-day-today';
+      if (date === calExpandedDate) cls += ' cf-day-expanded';
+      if (info.pickCount) cls += ' cf-day-selected';
+      if (calFreeOnly && info.state === 'busy' && !info.pickCount) cls += ' cf-day-filtered';
+      return cls;
+    }
+
+    // شبكة الشهر: تسميات أيام الأسبوع + أسابيع صفوفاً وأيام أعمدةً
+    // (الأسبوع يبدأ الأحد) + شريط تنقل (السابق/التالي/اليوم).
+    // أسماء أيام الأسبوع المختصرة في الترويسة (الكاملة في title).
+    function calMonthGridHtml(periods, holidays, today) {
+      var parts = calGridMonth.split('-');
+      var year = parseInt(parts[0], 10);
+      var month = parseInt(parts[1], 10) - 1;
+      var daysInMonth = new Date(year, month + 1, 0).getDate();
+      var lead = new Date(year, month, 1).getDay();
+      var shortDays = ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'];
+      var html = '<div class="cf-grid-nav">' +
+        '<button type="button" class="btn btn-outline btn-sm" id="cf-cal-prev">‹ السابق</button>' +
+        '<strong class="cf-grid-title">' + UI.escapeHtml(UI.fmtMonthYear(year, month)) + '</strong>' +
+        '<button type="button" class="btn btn-outline btn-sm" id="cf-cal-next">التالي ›</button>' +
+        '<button type="button" class="btn btn-outline btn-sm" id="cf-cal-today">اليوم</button>' +
+        '</div>' +
+        '<div class="cf-grid-weekdays">' +
+        shortDays.map(function (s, i) {
+          return '<div class="cf-grid-weekday" title="' + UI.escapeHtml(UI.WEEKDAYS[i]) + '">' + s + '</div>';
+        }).join('') + '</div>' +
+        '<div class="cf-month-cells">';
+      for (var i = 0; i < lead; i++) html += '<span class="cf-grid-blank"></span>';
+      for (var day = 1; day <= daysInMonth; day++) {
+        var date = year + '-' + (month + 1 < 10 ? '0' : '') + (month + 1) + '-' + (day < 10 ? '0' : '') + day;
+        var info = calDayAvail(date, periods, holidays);
+        var title = UI.WEEKDAYS[calWeekday(date)] + ' ' + UI.fmtDateShort(date) +
+          (info.state === 'holiday' ? ' — عطلة: ' + holidays[date] :
+            info.state === 'weekend' ? ' — عطلة أسبوعية' :
+            info.state === 'none' ? '' : ' — ' + calFreePeriodsLabel(info.freeCount));
+        html += '<button type="button" class="' + calDayCellClass(date, info, today) + '" data-cf-grid-date="' + date + '" title="' + UI.escapeHtml(title) + '">' +
+          calDayCellInner(day, info) + '</button>';
+      }
+      var total = lead + daysInMonth;
+      for (var t = total; t % 7 !== 0; t++) html += '<span class="cf-grid-blank"></span>';
+      html += '</div>';
+      return html;
+    }
+
+    // لوحة فترات اليوم المفتوح أسفل الشبكة: شرائح الفترات بحالات
+    // v2.2 نفسها (المحددات .cf-period-chip + data-cf-chip-date /
+    // data-cf-chip-period ثابتة) + تفاصيل المحجوز + منتقيات قاعة
+    // الجلسات المختارة. تحمل data-cf-date ليبقى إدراج صفوف القاعة
+    // والتفاصيل يعمل كما في v2.2.
+    function calDayPanelHtml(date, periods, holidays, today) {
       var d = UI.parseDateStr(date);
       var label = UI.WEEKDAYS[d.getDay()] + ' ' + UI.fmtDateShort(date);
       var isHoliday = !!holidays[date];
-      var html = '<div class="cf-day" data-cf-date="' + date + '" style="border:1px solid #E2E8F0;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff' +
-        (isHoliday ? ';opacity:0.75' : '') + '">' +
-        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+      var isWeekend = calIsWeekend(date);
+      var html = '<div class="cf-day-panel" data-cf-date="' + date + '">' +
+        '<div class="cf-panel-head">' +
         '<strong>' + UI.escapeHtml(label) + '</strong>';
       if (date === today) html += '<span class="pill pill-navy">اليوم</span>';
       if (isHoliday) html += '<span class="pill pill-amber">عطلة: ' + UI.escapeHtml(holidays[date]) + '</span>';
+      if (isWeekend && !isHoliday) html += '<span class="pill pill-amber">عطلة أسبوعية</span>';
       // ملخص توفر اليوم (v2.2) — يُحسب من بيانات الإشغال نفسها.
-      if (!isHoliday && periods.length) {
+      if (!isHoliday && !isWeekend && periods.length) {
         var freeCount = 0;
         periods.forEach(function (p) {
           if (calSlotState(date, p.id).state !== 'busy') freeCount++;
         });
         html += '<span class="cf-day-summary muted">' + UI.escapeHtml(calFreePeriodsLabel(freeCount)) + '</span>';
       }
-      html += '</div>';
-      if (isHoliday) {
-        // جلسات حالية في يوم عطلة (وُجدت قبل تسجيل العطلة): تُعرض
-        // قاعاتها فقط — بلا شرائح لإضافة جلسات جديدة.
-        var holidayPicks = periods.filter(function (p) { return calPicks[date + '|' + p.id]; });
-        html += '<div class="muted">' + (holidayPicks.length ?
-          'يوم عطلة — لا يمكن إضافة جلسات جديدة؛ الجلسات الحالية معروضة أدناه.' :
-          'لا جلسات في أيام العطل.') + '</div>';
-        if (holidayPicks.length) {
+      html += '<button type="button" class="btn btn-outline btn-sm cf-panel-close">إغلاق</button></div>';
+      if (isHoliday || isWeekend) {
+        // جلسات حالية في يوم عطلة (وُجدت قبل تسجيل العطلة أو قبل
+        // تغيير أيام العطلة الأسبوعية): تُعرض قاعاتها فقط — بلا
+        // شرائح لإضافة جلسات جديدة.
+        var closedPicks = periods.filter(function (p) { return calPicks[date + '|' + p.id]; });
+        html += '<div class="muted">' + (closedPicks.length ?
+          (isHoliday ? 'يوم عطلة — لا يمكن إضافة جلسات جديدة؛ الجلسات الحالية معروضة أدناه.' :
+            'يوم عطلة أسبوعية — لا يمكن إضافة جلسات جديدة؛ الجلسات الحالية معروضة أدناه.') :
+          (isHoliday ? 'لا جلسات في أيام العطل.' : 'لا جلسات في أيام العطلة الأسبوعية.')) + '</div>';
+        if (closedPicks.length) {
           html += '<div class="cf-day-halls">';
-          holidayPicks.forEach(function (p) { html += calHallRowHtml(calPicks[date + '|' + p.id]); });
+          closedPicks.forEach(function (p) { html += calHallRowHtml(calPicks[date + '|' + p.id]); });
           html += '</div>';
         }
       } else if (!periods.length) {
@@ -1568,48 +1990,50 @@
       return html;
     }
 
+    // تحديث خلية يوم واحد في الشبكة بعد تبديل شريحة (دون إعادة
+    // رسم كاملة — للحفاظ على موضع التمرير والتركيز).
+    function calSyncGridDay(date) {
+      var cell = card.querySelector('[data-cf-grid-date="' + date + '"]');
+      if (!cell) return;
+      var periods = sortedPeriods();
+      var holidays = {};
+      App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = h.name; });
+      var info = calDayAvail(date, periods, holidays);
+      cell.className = calDayCellClass(date, info, UI.todayStr());
+      cell.innerHTML = calDayCellInner(UI.parseDateStr(date).getDate(), info);
+    }
+
+    // رسم الرزنامة (v2.3): شبكة شهر واحد + لوحة فترات اليوم
+    // المفتوح أسفلها (إن كان ضمن الشهر المعروض). resetSpan
+    // (تغيّر عدد الجلسات/تاريخ البدء/الأيام المفضلة) يعيد الشهر
+    // إلى شهر أول جلسة مختارة، وإلا شهر تاريخ البدء. زر «إظهار
+    // أسابيع إضافية» مخفي دائماً — التنقل بين الأشهر يغني عنه.
     function renderCalendar(resetSpan) {
       var calEl = card.querySelector('#cf-calendar');
       if (!calEl) return;
       calOccupied = buildHallOccupancy(isEdit ? course.id : null);
-      calOccupiedDetail = buildHallOccupancyDetail(isEdit ? course.id : null);
+      calOccupiedDetail = buildHallOccupancyDetail(isEdit ? course.id : null, calCourseTypeVal());
       calDetailKey = null;
       // رسالة التعبئة الذكية تُمسح عند أي إعادة رسم (تغيّر السياق).
       var noteEl = card.querySelector('#cf-cal-smart-note');
       if (noteEl) { noteEl.textContent = ''; noteEl.hidden = true; }
       var periods = sortedPeriods();
-      if (resetSpan) calWeeksShown = calComputeWeeks();
       var startDate = calStartDateVal();
       var picks = calPicksList();
-      // النطاق يغطي الاختيارات دائماً (حتى بعد تغيير تاريخ البدء).
-      var rangeStart = startDate;
-      var rangeEnd = calAddDays(startDate, calWeeksShown * 7 - 1);
-      picks.forEach(function (p) {
-        if (p.date < rangeStart) rangeStart = p.date;
-        if (p.date > rangeEnd) rangeEnd = p.date;
-      });
+      if (resetSpan || !calGridMonth) {
+        var anchor = picks.length ? sortPicks(picks)[0].date : startDate;
+        calGridMonth = calMonthKey(anchor) || calMonthKey(UI.todayStr());
+      }
       var holidays = {};
       App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = h.name; });
       var today = UI.todayStr();
-      var totalDays = Math.round((UI.parseDateStr(rangeEnd).getTime() - UI.parseDateStr(rangeStart).getTime()) / 86400000) + 1;
-      var weeksCount = Math.ceil(totalDays / 7);
-      var html = '';
-      for (var w = 0; w < weeksCount; w++) {
-        var weekStart = calAddDays(rangeStart, w * 7);
-        var weekEnd = calAddDays(rangeStart, Math.min(w * 7 + 6, totalDays - 1));
-        html += '<div class="cf-week" data-cf-week="' + w + '" style="margin-bottom:16px">' +
-          '<div class="cf-week-title" style="font-weight:700;margin-bottom:8px">الأسبوع ' + (w + 1) + ' · ' +
-          UI.escapeHtml(UI.fmtDateShort(weekStart) + ' – ' + UI.fmtDate(weekEnd)) + '</div>';
-        for (var i = 0; i < 7; i++) {
-          var dayIndex = w * 7 + i;
-          if (dayIndex >= totalDays) break;
-          html += calDayRowHtml(calAddDays(rangeStart, dayIndex), periods, holidays, today);
-        }
-        html += '</div>';
+      var html = calMonthGridHtml(periods, holidays, today);
+      if (calExpandedDate && calMonthKey(calExpandedDate) === calGridMonth) {
+        html += calDayPanelHtml(calExpandedDate, periods, holidays, today);
       }
       calEl.innerHTML = html;
       var moreBtn = card.querySelector('#cf-cal-more');
-      if (moreBtn) moreBtn.hidden = calWeeksShown >= 52;
+      if (moreBtn) moreBtn.hidden = true;
       calRefreshSummary();
     }
 
@@ -1626,17 +2050,14 @@
       // الجلسات الحالية العدد (تقسيم/إضافة يدوية) فلا يُحظر الحفظ
       // (كما في submitCourseForm) — العداد يبقى معلومة فقط.
       var over = !isEdit && sc > 0 && picks.length > sc;
-      // اختيارات بلا شريحة ولا صف قاعة في الرزنامة (فترات حُذفت
-      // بعد إنشاء الجلسة): تُذكر في العداد حتى لا تكون صامتة.
+      // اختيارات بفترات محذوفة (حُذفت الفترة بعد إنشاء الجلسة):
+      // تُذكر في العداد حتى لا تكون صامتة. (v2.3: الشرائح تظهر
+      // لليوم المفتوح فقط، فلا يُقاس «غير المعروض» من الـ DOM —
+      // وجود الفترة في المتجر هو المعيار.)
       var invisible = 0;
-      var calElForCount = card.querySelector('#cf-calendar');
-      if (calElForCount) {
-        picks.forEach(function (p) {
-          var chip = calElForCount.querySelector('[data-cf-chip-date="' + p.date + '"][data-cf-chip-period="' + p.periodId + '"]');
-          var hallRow = calElForCount.querySelector('[data-cf-hallrow="' + p.date + '|' + p.periodId + '"]');
-          if (!chip && !hallRow) invisible++;
-        });
-      }
+      picks.forEach(function (p) {
+        if (!App.Store.get('periods', p.periodId)) invisible++;
+      });
       if (summaryEl) {
         var remaining = sc > 0 ? sc - picks.length : 0;
         summaryEl.textContent = 'تم اختيار ' + picks.length + ' جلسة' + (sc > 0 ? ' من ' + sc + ' مطلوبة' : '') +
@@ -1691,6 +2112,31 @@
       // النقر على شريحة فترة يبدّل اختيارها جلسةً؛ والنقر على شريحة
       // محجوزة كلياً (غير مختارة) يعرض سبب الحجز بدل الاختيار.
       calEl.addEventListener('click', function (e) {
+        // تنقل الشبكة الشهرية (v2.3): السابق/التالي/اليوم.
+        var navBtn = e.target && e.target.closest ? e.target.closest('#cf-cal-prev, #cf-cal-next, #cf-cal-today') : null;
+        if (navBtn && calEl.contains(navBtn)) {
+          if (navBtn.id === 'cf-cal-prev') calGridMonth = calShiftMonth(calGridMonth, -1);
+          else if (navBtn.id === 'cf-cal-next') calGridMonth = calShiftMonth(calGridMonth, 1);
+          else { calGridMonth = calMonthKey(UI.todayStr()); calExpandedDate = UI.todayStr(); }
+          renderCalendar(false);
+          return;
+        }
+        // زر إغلاق لوحة اليوم المفتوح.
+        var panelClose = e.target && e.target.closest ? e.target.closest('.cf-panel-close') : null;
+        if (panelClose && calEl.contains(panelClose)) {
+          calExpandedDate = null;
+          renderCalendar(false);
+          return;
+        }
+        // النقر على يوم في الشبكة يفتح لوحة فتراته (أو يغلقها
+        // إن كان مفتوحاً)؛ النقر على يوم آخر ينقل اللوحة إليه.
+        var gridDay = e.target && e.target.closest ? e.target.closest('[data-cf-grid-date]') : null;
+        if (gridDay && calEl.contains(gridDay)) {
+          var gd = gridDay.getAttribute('data-cf-grid-date');
+          calExpandedDate = (calExpandedDate === gd) ? null : gd;
+          renderCalendar(false);
+          return;
+        }
         // زر «اختيار هذه الفترة» داخل تفاصيل شريحة محجوزة.
         var detailPick = e.target && e.target.closest ? e.target.closest('[data-cf-detail-pick]') : null;
         if (detailPick && calEl.contains(detailPick)) {
@@ -1705,6 +2151,7 @@
             var dpDayHalls = calEl.querySelector('[data-cf-date="' + dpDate + '"] .cf-day-halls');
             if (dpDayHalls) dpDayHalls.insertAdjacentHTML('beforeend', calHallRowHtml(calPicks[dpKey]));
           }
+          calSyncGridDay(dpDate);
           calCloseDetail();
           calRefreshSummary();
           return;
@@ -1737,6 +2184,7 @@
           var dayHalls = calEl.querySelector('[data-cf-date="' + date + '"] .cf-day-halls');
           if (dayHalls) dayHalls.insertAdjacentHTML('beforeend', calHallRowHtml(calPicks[key]));
         }
+        calSyncGridDay(date);
         calRefreshSummary();
       });
       // تغيير قاعة جلسة مختارة (مع الإضافة السريعة للقاعة عند فراغ القائمة).
@@ -1786,6 +2234,14 @@
         renderCalendar(false);
       });
     }
+    // تغيير نوع الدورة (v2.3 — W3) يغيّر حالة التوفر على الشرائح
+    // (قاعات النوع المطابق فقط) — والاختيارات الحالية لا تتأثر.
+    var courseTypeSel = card.querySelector('[name="courseType"]');
+    if (courseTypeSel) {
+      courseTypeSel.addEventListener('change', function () {
+        renderCalendar(false);
+      });
+    }
     var freeOnlyBtn = card.querySelector('#cf-cal-freeonly');
     if (freeOnlyBtn) freeOnlyBtn.addEventListener('click', function () {
       calFreeOnly = !calFreeOnly;
@@ -1821,6 +2277,8 @@
   // وفترتها وخطتها الأسبوعية فقط — الجلسات الحالية لا تتغير.
   function submitCourseForm(form, close, submitBtn, course, isEdit, calPicks) {
     var name = form.querySelector('[name="name"]').value.trim();
+    var customNameInput = form.querySelector('[name="customName"]');
+    var customName = customNameInput ? customNameInput.value.trim() : '';
     var code = form.querySelector('[name="code"]').value.trim();
     var sessionCount = parseInt(form.querySelector('[name="sessionCount"]').value, 10);
     var budget = parseInt(form.querySelector('[name="budget"]').value, 10) || 0;
@@ -1832,6 +2290,10 @@
     var groupId = form.querySelector('[name="groupId"]').value || null;
     var directorateId = form.querySelector('[name="directorateId"]').value || null;
     var level = form.querySelector('[name="level"]').value || 'none';
+    // نوع الدورة (v2.3 — W3): إداري افتراضياً؛ يُحفظ مع الدورة
+    // ويُمرَّر إلى إنشاء الجلسات لمطابقة القاعات.
+    var courseTypeEl = form.querySelector('[name="courseType"]');
+    var courseType = (courseTypeEl && courseTypeEl.value === 'technical') ? 'technical' : 'admin';
 
     var days = [];
     form.querySelectorAll('[data-day]:checked').forEach(function (cb) { days.push(parseInt(cb.getAttribute('data-day'), 10)); });
@@ -1900,7 +2362,7 @@
         return window.TadreebDB.add('trainees', {
           name: newTraineeName,
           code: App.nextCode('trainees'),
-          directorateId: form.querySelector('[name="newTraineeDirectorate"]').value || null,
+          directorateId: (function () { var v = form.querySelector('[name="newTraineeDirectorate"]').value; return (v && v !== '__new__') ? v : null; })(),
           phone: form.querySelector('[name="newTraineePhone"]').value.trim(),
           notes: form.querySelector('[name="newTraineeNotes"]').value.trim()
         }).then(function (id) { traineeIds.push(id); return ctx; });
@@ -1910,8 +2372,10 @@
     chain.then(function (ctx) {
       var data = {
         name: name,
+        customName: customName || null,
         code: code,
         level: level,
+        courseType: courseType,
         trainerId: ctx.trainerId,
         groupId: groupId,
         directorateId: directorateId,
@@ -1950,6 +2414,7 @@
       }
       data.status = 'active';
       data.trainerContract = null;
+      data.groupNumber = App.nextGroupNumber();
       return window.TadreebDB.add('courses', data).then(function (id) {
         return { courseId: id, edited: false };
       });
@@ -1958,15 +2423,15 @@
       if (res.edited) {
         UI.setBtnLoading(submitBtn, false);
         close();
-        UI.toast('تم حفظ تعديلات الدورة', 'success');
+        UI.toast('تم حفظ تعديلات مجموعة التدريب', 'success');
         return App.refresh();
       }
       // إنشاء جلسات الدورة الجديدة من اختيارات الرزنامة (v2.1) —
       // سجلات مطابقة لما ينتجه توليد الجدول، وتُعرض نافذة النتيجة نفسها.
-      return createPickedSessions(res.courseId, picks).then(function (result) {
+      return createPickedSessions(res.courseId, picks, courseType).then(function (result) {
         UI.setBtnLoading(submitBtn, false);
         close();
-        UI.toast('تم إنشاء الدورة وتوليد الجدول', 'success');
+        UI.toast('تم إنشاء مجموعة التدريب وتوليد الجدول', 'success');
         showScheduleResult(result);
         return App.refresh().then(function () {
           App.showScreen('course-detail', { courseId: res.courseId });
@@ -1981,7 +2446,7 @@
       });
     }).catch(function (err) {
       UI.setBtnLoading(submitBtn, false);
-      UI.formError(form, err && err.message ? err.message : 'تعذّر حفظ الدورة');
+      UI.formError(form, err && err.message ? err.message : 'تعذّر حفظ مجموعة التدريب');
     });
   }
 
@@ -1994,8 +2459,8 @@
   function openRescheduleConfirm(course, newStartDate, oldStartDate, preview, closeForm) {
     var settled = false;
     UI.openModal({
-      title: 'تغيير تاريخ بدء الدورة',
-      bodyHTML: '<p>سيتم تغيير تاريخ بدء الدورة إلى ' + UI.escapeHtml(UI.fmtDate(newStartDate)) +
+      title: 'تغيير تاريخ بدء مجموعة التدريب',
+      bodyHTML: '<p>سيتم تغيير تاريخ بدء مجموعة التدريب إلى ' + UI.escapeHtml(UI.fmtDate(newStartDate)) +
         '. سيتم الاحتفاظ بـ ' + preview.kept + ' جلسة (لها حضور أو ملاحظات أو مكتملة) في مواعيدها، وحذف ' +
         preview.removed + ' جلسة مجدولة وإعادة توليدها من التاريخ الجديد. هل أنت متأكد؟</p>',
       actions: [
@@ -2008,7 +2473,7 @@
             closeForm();
             UI.toast('جارٍ إعادة توليد الجدول…');
             window.TadreebDB.rescheduleCourse(course.id, newStartDate).then(function (result) {
-              UI.toast('تم تغيير تاريخ بدء الدورة وإعادة توليد ' + result.created + ' جلسة', 'success');
+              UI.toast('تم تغيير تاريخ بدء مجموعة التدريب وإعادة توليد ' + result.created + ' جلسة', 'success');
               App.refresh();
             }).catch(UI.toastError);
           }
@@ -2043,6 +2508,9 @@
     if (result.skippedHolidays) {
       body += '<p>تُخطي <strong>' + result.skippedHolidays + '</strong> يوم عطلة (بلا جلسات).</p>';
     }
+    if (result.skippedWeekend) {
+      body += '<p>تُخطي <strong>' + result.skippedWeekend + '</strong> يوم عطلة أسبوعية (بلا جلسات).</p>';
+    }
     if (result.unassignedHalls && result.unassignedHalls.length) {
       body += '<p>جلسات بلا قاعة حرة (تحتاج تعييناً يدوياً):</p><ul>';
       result.unassignedHalls.forEach(function (d) {
@@ -2066,8 +2534,8 @@
     var courseId = params && params.courseId;
     var course = App.Store.get('courses', courseId);
     if (!course) {
-      container.innerHTML = '<div class="error-view"><div class="error-title">الدورة غير موجودة</div>' +
-        '<p>ربما حُذفت هذه الدورة.</p><button class="btn" type="button" id="cd-back-btn">العودة إلى الدورات</button></div>';
+      container.innerHTML = '<div class="error-view"><div class="error-title">مجموعة التدريب غير موجودة</div>' +
+        '<p>ربما حُذفت مجموعة التدريب هذه.</p><button class="btn" type="button" id="cd-back-btn">العودة إلى مجموعات التدريب</button></div>';
       document.getElementById('cd-back-btn').addEventListener('click', function () { App.showScreen('courses'); });
       return;
     }
@@ -2099,20 +2567,23 @@
     var selectedSession = detailState.selectedSessionId ? Store.get('sessions', detailState.selectedSessionId) : null;
 
     var html = '';
-    html += '<div class="page-head"><div><a class="back-link" href="#" id="cd-back">العودة إلى الدورات</a>' +
-      '<h1>' + UI.escapeHtml(course.name) + '</h1>' +
+    var detailDisplayName = App.groupDisplayName(course);
+    var detailAutoName = App.groupAutoName(course);
+    html += '<div class="page-head"><div><a class="back-link" href="#" id="cd-back">العودة إلى مجموعات التدريب</a>' +
+      '<h1>' + UI.escapeHtml(detailDisplayName) + '</h1>' +
+      (App.customGroupName(course) ? '<div class="group-auto-subtitle">' + UI.escapeHtml(detailAutoName) + '</div>' : '') +
       '<div class="muted">' + UI.escapeHtml(UI.daysLabel(course.days)) + ' · ' +
       UI.escapeHtml(period ? period.label : '') + '</div></div>' +
       '<div class="head-actions">' + UI.pillForCourseStatus(course.status) +
-      '<button class="btn btn-outline btn-sm" type="button" id="cd-export-btn">تصدير ملف الدورة ↓</button>' +
-      (canWrite ? '<button class="btn btn-outline btn-sm" type="button" id="cd-edit-btn">تعديل الدورة</button>' : '') +
+      '<button class="btn btn-outline btn-sm" type="button" id="cd-export-btn">تصدير ملف مجموعة التدريب ↓</button>' +
+      (canWrite ? '<button class="btn btn-outline btn-sm" type="button" id="cd-edit-btn">تعديل مجموعة التدريب</button>' : '') +
       '</div></div>';
 
     // البطاقات الوصفية
     var contractHtml = '';
     if (contract) {
       if (contract.type === 'fixed') {
-        contractHtml = 'الأجر: ثابت للدورة كاملة · ' + UI.fmtMoney(contract.amount);
+        contractHtml = 'الأجر: ثابت لمجموعة التدريب كاملة · ' + UI.fmtMoney(contract.amount);
       } else {
         var hours = 0;
         if (period) {
@@ -2142,8 +2613,14 @@
     html += '<div class="meta-grid">' +
       '<div class="meta-box"><div class="k">المعرّف</div><div class="v">' +
       UI.escapeHtml(App.displayCode(course, 'courses')) + '</div></div>' +
+      '<div class="meta-box"><div class="k">رقم المجموعة</div><div class="v">' +
+      UI.escapeHtml(String(App.groupNumber(course))) + '</div></div>' +
+      '<div class="meta-box"><div class="k">الدورة</div><div class="v">' +
+      UI.escapeHtml(course.name) + '</div></div>' +
       '<div class="meta-box"><div class="k">المستوى</div><div class="v">' +
       UI.escapeHtml(App.levelName(course.level)) + '</div></div>' +
+      '<div class="meta-box"><div class="k">نوع مجموعة التدريب</div><div class="v">' +
+      UI.escapeHtml(courseTypeLabel(typeOfCourse(course))) + '</div></div>' +
       '<div class="meta-box"><div class="k">المدرب</div><div class="v">' +
       UI.escapeHtml(trainer ? trainer.name : 'بدون مدرب حالياً') + '</div>' +
       (contractHtml ? '<div class="muted" style="font-size:12px;line-height:1.6">' + contractHtml + '</div>' : '') +
@@ -2157,11 +2634,13 @@
       '<div class="meta-box"><div class="k">الأيام</div><div class="v">' + UI.escapeHtml(UI.daysLabel(course.days)) + '</div></div>' +
       '<div class="meta-box"><div class="k">الوقت</div><div class="v">' + (period ? UI.fmtTimeRange(period.start, period.end) : '—') + '</div></div>' +
       '<div class="meta-box"><div class="k">المديريات</div><div class="v">' + dirsHtml + '</div></div>' +
+      '<div class="meta-box"><div class="k">مديريات المتدربين</div><div class="v">' +
+      UI.escapeHtml(App.groupDirectoratesSummary(course) || '—') + '</div></div>' +
       dayPlanMetaHtml(course) +
       '</div>';
 
     // التقدم
-    html += '<div class="card"><div class="section-title-row"><strong>التقدم في الدورة</strong>' +
+    html += '<div class="card"><div class="section-title-row"><strong>التقدم في مجموعة التدريب</strong>' +
       '<span class="muted">' + prog.done + ' جلسات مكتملة من ' + prog.total + ' · المتبقي ' + prog.remaining + ' جلسة</span></div>' +
       '<div class="progress"><i style="width:' + prog.percent + '%"></i></div></div>';
 
@@ -2217,13 +2696,13 @@
     var detailGrouped = detailGroup && (detailGroup.traineeIds || []).length > 0;
     var traineesSource = detailGrouped
       ? 'المتدربون: أعضاء المجموعة «' + detailGroup.name + '» (' + trainees.length + ')'
-      : 'المتدربون: قائمة الدورة (' + trainees.length + ')';
+      : 'المتدربون: قائمة مجموعة التدريب (' + trainees.length + ')';
     html += '<div class="card"><h2>المتدربون (' + trainees.length + ')</h2>' +
       '<div class="muted" style="margin-bottom:10px">' + UI.escapeHtml(traineesSource) + '</div>';
     if (!trainees.length) {
       html += '<div class="muted">' + (course.groupId ?
-        'لا متدربين في هذه الدورة بعد — أضف أعضاء إلى المجموعة من الدليل.' :
-        'لا متدربين في هذه الدورة بعد — أضفهم من تعديل الدورة.') + '</div>';
+        'لا متدربين في مجموعة التدريب هذه بعد — أضف أعضاء إلى المجموعة من الدليل.' :
+        'لا متدربين في مجموعة التدريب هذه بعد — أضفهم من تعديل مجموعة التدريب.') + '</div>';
     } else {
       trainees.forEach(function (t) {
         html += '<div class="list-row">' +
@@ -2237,7 +2716,7 @@
           html += '<div class="list-row-actions row-actions">' +
             '<button class="btn btn-outline btn-sm" type="button" data-trainee-notes="' + UI.escapeHtml(t.id) + '">ملاحظات</button>' +
             (detailGrouped ? '' :
-              '<button class="btn btn-danger btn-sm" type="button" data-trainee-remove="' + UI.escapeHtml(t.id) + '">إزالة من الدورة</button>') +
+              '<button class="btn btn-danger btn-sm" type="button" data-trainee-remove="' + UI.escapeHtml(t.id) + '">إزالة من مجموعة التدريب</button>') +
             '</div>';
         }
         html += '</div>';
@@ -2246,11 +2725,11 @@
     html += '</div>';
 
     // ملاحظات الدورة
-    html += '<div class="card"><h2>ملاحظات الدورة</h2><div id="cd-notes"></div></div>';
+    html += '<div class="card"><h2>ملاحظات مجموعة التدريب</h2><div id="cd-notes"></div></div>';
 
     // الميزانية
     var spentPct = budget.allocated > 0 ? Math.min(100, Math.round((budget.totalSpent / budget.allocated) * 100)) : 0;
-    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">ميزانية الدورة</h2>' +
+    html += '<div class="card"><div class="section-title-row"><h2 style="margin:0">ميزانية مجموعة التدريب</h2>' +
       '<div class="head-actions"><button class="btn btn-outline btn-sm" type="button" id="cd-budget-export-btn">تصدير الميزانية ↓</button>' +
       '<button class="btn btn-outline btn-sm" type="button" id="cd-closing-btn">تقرير ختامي</button></div></div>' +
       '<div class="meta-grid">' +
@@ -2324,8 +2803,8 @@
       var coursePanelEl = container.querySelector('#course-stats-panel');
       var courseRes = window.TadreebStats.computeCourse(courseId);
       window.TadreebStats.renderPanel(coursePanelEl, {
-        section: 'course', title: 'إحصاءات الدورة', metrics: courseRes.metrics,
-        export: { label: 'تصدير ملف الدورة ↓', onClick: function () { openCourseFileExport(); } }
+        section: 'course', title: 'إحصاءات مجموعة التدريب', metrics: courseRes.metrics,
+        export: { label: 'تصدير ملف مجموعة التدريب ↓', onClick: function () { openCourseFileExport(); } }
       });
       window.TadreebStats.courseAttendance(courseId).then(function (r) {
         window.TadreebStats.updateMetrics(coursePanelEl, { attendanceRate: r.rate });
@@ -2463,11 +2942,11 @@
     container.querySelectorAll('[data-trainee-remove]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var t = App.Store.get('trainees', btn.getAttribute('data-trainee-remove'));
-        UI.confirmDialog('إزالة المتدرب من الدورة', 'هل أنت متأكد من إزالة «' + t.name + '» من هذه الدورة؟ يبقى المتدرب مسجلاً في الدليل.',
+        UI.confirmDialog('إزالة المتدرب من مجموعة التدريب', 'هل أنت متأكد من إزالة «' + t.name + '» من مجموعة التدريب هذه؟ يبقى المتدرب مسجلاً في الدليل.',
           function () {
             var ids = (course.traineeIds || []).filter(function (id) { return id !== t.id; });
             window.TadreebDB.update('courses', course.id, { traineeIds: ids }).then(function () {
-              UI.toast('تمت إزالة المتدرب من الدورة', 'success');
+              UI.toast('تمت إزالة المتدرب من مجموعة التدريب', 'success');
               App.refresh();
             }).catch(UI.toastError);
           });
@@ -2509,16 +2988,16 @@
     // التصدير — مشترك بين أزرار الترويسة وأزرار لوحتي الإحصاءات.
     function openCourseFileExport() {
       UI.openPicker({
-        title: 'تصدير ملف الدورة',
+        title: 'تصدير ملف مجموعة التدريب',
         sections: [
-          { id: 'info', label: 'معلومات الدورة', checked: true },
+          { id: 'info', label: 'معلومات مجموعة التدريب', checked: true },
           { id: 'schedule', label: 'جدول الجلسات', checked: true },
           { id: 'trainees', label: 'أسماء المتدربين', checked: true },
           { id: 'attendance', label: 'الحضور والغياب', checked: true },
           { id: 'budget', label: 'الميزانية', checked: true }
         ],
         onConfirm: function (result) {
-          UI.toast('جارٍ تجهيز ملف الدورة…');
+          UI.toast('جارٍ تجهيز ملف مجموعة التدريب…');
           App.buildCourseFileData(courseId).then(function (data) {
             UI.callExport('exportCourseFile', [data, { sections: result.sections }]);
           }).catch(UI.toastError);
@@ -2534,7 +3013,7 @@
       UI.openPicker({
         title: 'تصدير التقرير الختامي',
         sections: [
-          { id: 'info', label: 'معلومات الدورة', checked: true },
+          { id: 'info', label: 'معلومات مجموعة التدريب', checked: true },
           { id: 'schedule', label: 'جدول الجلسات', checked: true },
           { id: 'trainees', label: 'أسماء المتدربين', checked: true },
           { id: 'attendance', label: 'الحضور والغياب', checked: true },
@@ -2560,7 +3039,7 @@
         scopeOptions: [
           { id: 'one', label: 'جلسة واحدة (الجلسة المحددة)' },
           { id: 'selected', label: 'جلسات محددة' },
-          { id: 'all', label: 'كل جلسات الدورة' }
+          { id: 'all', label: 'كل جلسات مجموعة التدريب' }
         ],
         onConfirm: function (result) {
           var scope = result && result.scope;
@@ -2595,7 +3074,7 @@
           return '<label class="tadreeb-export-check"><input type="checkbox" name="session" value="' +
             UI.escapeHtml(s.id) + '"' + checked + '> ' + label + '</label>';
         }).join('');
-        if (!allSessions.length) fields = '<div class="muted">لا توجد جلسات في هذه الدورة بعد.</div>';
+        if (!allSessions.length) fields = '<div class="muted">لا توجد جلسات في مجموعة التدريب هذه بعد.</div>';
         UI.openFormModal('اختر الجلسات', fields, function (form, close) {
           var picked = Array.prototype.slice.call(form.querySelectorAll('input[name="session"]:checked'))
             .map(function (el) { return el.value; });
@@ -2639,7 +3118,7 @@
       '<div class="field"><label>التخصص</label><input type="text" name="newTrainerSpecialty"></div>' +
       '<div class="field"><label>رقم الهاتف</label><input type="text" name="newTrainerPhone"></div></div></div></div>' +
       '<div class="field field-full"><label>نوع الأجر</label>' +
-      '<label class="check-row"><input type="radio" name="payType" value="fixed"' + (!course.trainerContract || course.trainerContract.type === 'fixed' ? ' checked' : '') + '> أجرة ثابتة للدورة كاملة</label>' +
+      '<label class="check-row"><input type="radio" name="payType" value="fixed"' + (!course.trainerContract || course.trainerContract.type === 'fixed' ? ' checked' : '') + '> أجرة ثابتة لمجموعة التدريب كاملة</label>' +
       '<label class="check-row"><input type="radio" name="payType" value="hourly"' + (course.trainerContract && course.trainerContract.type === 'hourly' ? ' checked' : '') + '> أجر بالساعة</label></div>' +
       '<div class="field" id="ct-fixed-box"><label>المبلغ الثابت (ل.س)</label><input type="number" name="amount" min="0" value="' +
       UI.escapeHtml(course.trainerContract && course.trainerContract.type === 'fixed' ? course.trainerContract.amount : '') + '"></div>' +
@@ -2656,7 +3135,7 @@
         window.TadreebDB.update('courses', course.id, { trainerId: null, trainerContract: null }).then(function () {
           UI.setBtnLoading(submitBtn, false);
           close();
-          UI.toast('تمت إزالة المدرب من الدورة', 'success');
+          UI.toast('تمت إزالة المدرب من مجموعة التدريب', 'success');
           App.refresh();
         }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.toastError(err); });
         return;
@@ -2664,7 +3143,7 @@
       if (trainerSel === '__new__' && !newTrainerName) { UI.formError(form, 'اكتب اسم المدرب الجديد'); return; }
       var amount = parseInt(form.querySelector('[name="amount"]').value, 10) || 0;
       var rate = parseInt(form.querySelector('[name="rate"]').value, 10) || 0;
-      if (payType === 'fixed' && amount <= 0) { UI.formError(form, 'أدخل المبلغ الثابت للدورة'); return; }
+      if (payType === 'fixed' && amount <= 0) { UI.formError(form, 'أدخل المبلغ الثابت لمجموعة التدريب'); return; }
       if (payType === 'hourly' && rate <= 0) { UI.formError(form, 'أدخل الأجر للساعة الواحدة'); return; }
       UI.formError(form, '');
       UI.setBtnLoading(submitBtn, true);
@@ -2709,7 +3188,7 @@
       '<div class="field"><label>عدد الأسابيع (بدءاً من اليوم)</label><select name="weeks">' +
       '<option value="1">أسبوع واحد</option><option value="2" selected>أسبوعان</option>' +
       '<option value="3">3 أسابيع</option><option value="4">4 أسابيع</option></select>' +
-      '<div class="field-hint">تُنشأ الجلسات الجديدة فقط — الجلسات الموجودة لا تتكرر، والعطل تُتخطى.</div></div>',
+      '<div class="field-hint">تُنشأ الجلسات الجديدة فقط — الجلسات الموجودة لا تتكرر، والعطل وأيام العطلة الأسبوعية تُتخطى.</div></div>',
       function (form, close, submitBtn) {
         var weeks = parseInt(form.querySelector('[name="weeks"]').value, 10) || 2;
         UI.setBtnLoading(submitBtn, true, 'جارٍ التوليد…');
@@ -2724,6 +3203,11 @@
 
   function openAddSessionModal(course) {
     var periods = App.Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    // القاعات مرتبة: المطابقة لنوع الدورة أولاً، مع تسمية النوع في كل خيار (v2.3).
+    var wantHallType = typeOfCourse(course) === 'technical' ? 'computer' : 'admin';
+    var hallsSorted = App.Store.getAll('halls').slice().sort(function (a, b) {
+      return (typeOfHall(a) === wantHallType ? 0 : 1) - (typeOfHall(b) === wantHallType ? 0 : 1);
+    });
     var fields = '<div class="form-grid">' +
       '<div class="field"><label>التاريخ *</label><input type="date" name="date" required value="' + UI.todayStr() + '"></div>' +
       '<div class="field"><label>الفترة *</label><select name="periodId" required>' +
@@ -2732,8 +3216,8 @@
           UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(fmtRange12(p.start, p.end)) + ')</option>';
       }).join('') + '</select></div>' +
       '<div class="field field-full"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة (تُعيَّن لاحقاً)</option>' +
-      App.Store.getAll('halls').map(function (h) {
-        return '<option value="' + UI.escapeHtml(h.id) + '">' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
+      hallsSorted.map(function (h) {
+        return '<option value="' + UI.escapeHtml(h.id) + '">' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name + ' (' + (typeOfHall(h) === 'computer' ? 'حاسوب' : 'إدارية') + ')') + '</option>';
       }).join('') + '</select><div class="field-hint" id="as-availability"></div></div>' +
       '<div class="field field-full"><label>ملاحظة</label><input type="text" name="note" placeholder="ملاحظة على الجلسة (اختياري)"></div>' +
       '</div>';
@@ -2774,7 +3258,7 @@
       var periodId = card.querySelector('[name="periodId"]').value;
       if (!date || !periodId) { availEl.textContent = ''; return; }
       availEl.textContent = 'جارٍ فحص توفر القاعات…';
-      window.TadreebDB.checkHallAvailability(date, periodId).then(function (rows) {
+      window.TadreebDB.checkHallAvailability(date, periodId, typeOfCourse(course)).then(function (rows) {
         availEl.innerHTML = hallAvailabilityListHtml(rows);
         // تعطيل القاعات المشغولة في القائمة
         hallSel.querySelectorAll('option[value]').forEach(function (opt) {
@@ -2809,14 +3293,38 @@
     }, { submitLabel: 'حفظ', width: 'normal' });
   }
 
+  // تغيير قاعة جلسة (v2.3 — نوع القاعة): النقل ضمن النوع نفسه
+  // يمر عادياً؛ النقل بين نوعين مختلفين (إدارية ↔ حاسوب) يُظهر
+  // تحذيراً ويتطلب تأكيداً صريحاً بخانة اختيار. نوع القاعة الغائب
+  // يُعامل إداريةً. التحقق من التعارض (v2.1) باقٍ عبر updateSession.
   function openSessionHallModal(sessionId) {
     var s = App.Store.get('sessions', sessionId);
+    // نوع القاعة (مصدر الحقيقة TadreebDB.hallTypeOf — الحقل
+    // hallType؛ الاحتياطي يقرأ hallType ثم type؛ الغائب = إدارية).
+    function hallTypeOf(h) {
+      try {
+        if (window.TadreebDB && typeof window.TadreebDB.hallTypeOf === 'function') {
+          var t = window.TadreebDB.hallTypeOf(h);
+          if (t === 'computer' || t === 'admin') return t;
+        }
+      } catch (e) { /* احتياطي أدناه */ }
+      return (h && (h.hallType === 'computer' || h.type === 'computer')) ? 'computer' : 'admin';
+    }
+    function hallTypeLabel(t) { return t === 'computer' ? 'حاسوب' : 'إدارية'; }
+    function hallLabel(h) {
+      return App.displayCode(h, 'halls') + ' — ' + h.name + ' (' + hallTypeLabel(hallTypeOf(h)) + ')';
+    }
     var fields = '<div class="field"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة</option>' +
       App.Store.getAll('halls').map(function (h) {
-        return '<option value="' + UI.escapeHtml(h.id) + '"' + (s.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
-      }).join('') + '</select><div class="field-hint" id="sh-availability">جارٍ فحص توفر القاعات…</div></div>';
+        return '<option value="' + UI.escapeHtml(h.id) + '"' + (s.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(hallLabel(h)) + '</option>';
+      }).join('') + '</select><div class="field-hint" id="sh-availability">جارٍ فحص توفر القاعات…</div></div>' +
+      '<div class="hall-type-warn" data-cross-type-warn hidden>' +
+      '<strong>تحذير: نقل إلى نوع قاعة مختلف</strong><div data-cross-type-detail></div>' +
+      '<label class="check-row" style="margin-top:8px"><input type="checkbox" name="crossTypeConfirm"> أؤكد النقل إلى قاعة من نوع مختلف</label></div>';
+    var crossGuard = null;
     var modal = UI.openFormModal('تغيير قاعة الجلسة — ' + UI.fmtDateFull(s.date), fields, function (form, close, submitBtn) {
       var hallId = form.querySelector('[name="hallId"]').value || null;
+      if (crossGuard && !crossGuard()) return;
       UI.setBtnLoading(submitBtn, true);
       // عبر updateSession (لا update العام) ليفحص التعارض قبل الحفظ.
       window.TadreebDB.updateSession(sessionId, { hallId: hallId }).then(function () {
@@ -2826,6 +3334,40 @@
         App.refresh();
       }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.toastError(err); });
     }, { submitLabel: 'حفظ', width: 'normal' });
+    if (modal.element) {
+      // حارس النقل بين النوعين (نفس منطق screens-session.js).
+      (function () {
+        var sel = modal.element.querySelector('[name="hallId"]');
+        var warnEl = modal.element.querySelector('[data-cross-type-warn]');
+        var detailEl = modal.element.querySelector('[data-cross-type-detail]');
+        var confirmBox = modal.element.querySelector('[name="crossTypeConfirm"]');
+        var formEl = modal.element.querySelector('form') || modal.element;
+        if (!sel || !warnEl) { crossGuard = function () { return true; }; return; }
+        var currentHall = s.hallId ? App.Store.get('halls', s.hallId) : null;
+        function refresh() {
+          var targetId = sel.value || null;
+          var target = targetId ? App.Store.get('halls', targetId) : null;
+          var cross = !!(currentHall && target && targetId !== s.hallId &&
+            hallTypeOf(currentHall) !== hallTypeOf(target));
+          warnEl.hidden = !cross;
+          if (cross && detailEl) {
+            detailEl.textContent = 'القاعة الحالية (' + currentHall.name + ') من نوع ' +
+              hallTypeLabel(hallTypeOf(currentHall)) + '، والقاعة المختارة (' + target.name + ') من نوع ' +
+              hallTypeLabel(hallTypeOf(target)) + ' — قد لا تناسب متطلبات مجموعة التدريب.';
+          }
+          if (!cross && confirmBox) confirmBox.checked = false;
+          return cross;
+        }
+        sel.addEventListener('change', refresh);
+        refresh();
+        crossGuard = function () {
+          if (!refresh()) return true;
+          if (confirmBox && confirmBox.checked) return true;
+          UI.formError(formEl, 'أكّد النقل إلى قاعة من نوع مختلف بوضع علامة في خانة التأكيد');
+          return false;
+        };
+      })();
+    }
     window.TadreebDB.checkHallAvailability(s.date, s.periodId).then(function (rows) {
       var availEl = modal.element.querySelector('#sh-availability');
       if (!availEl) return;

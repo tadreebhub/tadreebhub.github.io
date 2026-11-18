@@ -14,6 +14,201 @@
     return (p.start || '') + ' - ' + (p.end || '');
   }
 
+  // ---------- مساعدات v2.3 (نقل/دمج/تأجيل/حضور) ----------
+  // تسميات حالات الحضور الإضافية: ui-helpers.js لا يملك «ملغي»
+  // و«لم يحضر» — نمدّد خريطة التسميات المشتركة عند التحميل (هذا
+  // الملف يُحمَّل بعد ui-helpers.js دائماً) حتى تظهر التسميتان في
+  // الشارات والتصدير دون تعديل ملف آخر.
+  if (typeof UI !== 'undefined' && UI.ATTENDANCE_LABELS) {
+    if (!UI.ATTENDANCE_LABELS.cancelled) UI.ATTENDANCE_LABELS.cancelled = 'ملغي';
+    if (!UI.ATTENDANCE_LABELS['did-not-attend']) UI.ATTENDANCE_LABELS['did-not-attend'] = 'لم يحضر';
+  }
+  // حالة إرثية: تُعرض بتسميتها الأصلية ولا تُختار (3 خيارات فقط).
+  function isLegacyAttStatus(status) { return status === 'excused' || status === 'did-not-attend'; }
+
+  // نوع القاعة: 'computer' أو 'admin' (الغائب = إدارية). مصدر
+  // الحقيقة TadreebDB.hallTypeOf (يملكه عامل الأنواع — الحقل
+  // hallType)؛ الاحتياطي يقرأ hallType ثم type.
+  function hallTypeOf(hall) {
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.hallTypeOf === 'function') {
+        var t = window.TadreebDB.hallTypeOf(hall);
+        if (t === 'computer' || t === 'admin') return t;
+      }
+    } catch (e) { /* احتياطي أدناه */ }
+    if (hall && (hall.hallType === 'computer' || hall.type === 'computer')) return 'computer';
+    return 'admin';
+  }
+  function hallTypeLabel(type) { return type === 'computer' ? 'حاسوب' : 'إدارية'; }
+  function hallOptionLabel(h) {
+    return App.displayCode(h, 'halls') + ' — ' + h.name + ' (' + hallTypeLabel(hallTypeOf(h)) + ')';
+  }
+
+  // أيام العطلة الأسبوعية: من الإعدادات عبر
+  // TadreebDB.getWeekendDays() إن وُجدت، وإلا الجمعة + السبت.
+  function weekendDays() {
+    try {
+      if (window.TadreebDB && typeof window.TadreebDB.getWeekendDays === 'function') {
+        var wd = window.TadreebDB.getWeekendDays();
+        if (Array.isArray(wd) && wd.length) return wd;
+      }
+    } catch (e) { /* الافتراضي أدناه */ }
+    return [5, 6];
+  }
+
+  function addDaysISO(dateStr, n) {
+    var d = UI.parseDateStr(dateStr);
+    if (!d) return dateStr;
+    d.setDate(d.getDate() + n);
+    return UI.dateToStr(d);
+  }
+  function todayDamascusISO() {
+    try {
+      if (window.TadreebTime && typeof window.TadreebTime.todayISO === 'function') return window.TadreebTime.todayISO();
+    } catch (e) { /* احتياطي أدناه */ }
+    return UI.todayStr();
+  }
+  function weekdayOf(dateStr) {
+    var d = UI.parseDateStr(dateStr);
+    return d ? d.getDay() : -1;
+  }
+  // قفل تحرير الحضور: مسموح يوم الجلسة واليوم التالي فقط؛ من
+  // اليوم الثاني بعدها يُغلق للجميع بلا استثناء (بتوقيت دمشق).
+  function isAttendanceLocked(sessionDate) {
+    if (!sessionDate) return false;
+    return todayDamascusISO() > addDaysISO(sessionDate, 1);
+  }
+  // هل التاريخ عطلة مسجلة؟
+  function isHolidayDate(dateStr) {
+    return App.Store.getAll('holidays').some(function (h) { return h.date === dateStr; });
+  }
+
+  // إشغال موعد من المخزن المحلي (بنفس قواعد checkHallAvailability:
+  // جلسة مجدولة غير ملغاة/عطلة أو اجتماع غير ملغى). تُعيد خريطة
+  // hallId -> تسمية الشاغل، باستثناء الجلسة نفسها.
+  function slotOccupants(dateStr, periodId, excludeSessionId) {
+    var busy = {};
+    App.Store.getAll('sessions').forEach(function (s) {
+      if (s.id === excludeSessionId) return;
+      if (s.date !== dateStr || s.periodId !== periodId) return;
+      if (!s.hallId || s.state === 'cancelled' || s.state === 'holiday') return;
+      var c = App.Store.get('courses', s.courseId);
+      busy[s.hallId] = c ? c.name : 'جلسة تدريبية';
+    });
+    App.Store.getAll('meetings').forEach(function (m) {
+      if (m.date !== dateStr || m.periodId !== periodId) return;
+      if (!m.hallId || m.status === 'cancelled') return;
+      busy[m.hallId] = 'اجتماع: ' + (m.title || '');
+    });
+    return busy;
+  }
+  // أول قاعة حرة من النوع المطلوب (القاعة الحالية أولاً إن كانت حرة).
+  function firstFreeHallOfType(dateStr, periodId, wantType, preferHallId, excludeSessionId) {
+    var busy = slotOccupants(dateStr, periodId, excludeSessionId);
+    var halls = App.Store.getAll('halls').slice();
+    halls.sort(function (a, b) {
+      if (a.id === preferHallId) return -1;
+      if (b.id === preferHallId) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    });
+    for (var i = 0; i < halls.length; i++) {
+      if (busy[halls[i].id]) continue;
+      if (wantType && hallTypeOf(halls[i]) !== wantType) continue;
+      return halls[i];
+    }
+    return null;
+  }
+  // البحث التلقائي عن أقرب موعد حر: بدءاً من الغد (أو من اليوم
+  // التالي للجلسة إن كانت مستقبلية)، الفترة نفسها أولاً ثم باقي
+  // الفترات، قاعة من النوع المطابق، تخطّي العطل الأسبوعية
+  // والمسجلة، أفق 56 يوماً. تُعيد {date, periodId, hallId} أو null.
+  function findNextFreeSlot(session) {
+    var periods = App.Store.getAll('periods').slice()
+      .sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    if (!periods.length) return null;
+    var ordered = periods.slice().sort(function (a, b) {
+      if (a.id === session.periodId) return -1;
+      if (b.id === session.periodId) return 1;
+      return (a.order || 0) - (b.order || 0);
+    });
+    var currentHall = session.hallId ? App.Store.get('halls', session.hallId) : null;
+    var wantType = currentHall ? hallTypeOf(currentHall) : null;
+    var holidays = {};
+    App.Store.getAll('holidays').forEach(function (h) { holidays[h.date] = true; });
+    var wd = weekendDays();
+    var start = addDaysISO(session.date, 1);
+    var tomorrow = addDaysISO(todayDamascusISO(), 1);
+    if (start < tomorrow) start = tomorrow;
+    for (var d = 0; d < 56; d++) {
+      var date = addDaysISO(start, d);
+      if (holidays[date]) continue;
+      if (wd.indexOf(weekdayOf(date)) !== -1) continue;
+      for (var p = 0; p < ordered.length; p++) {
+        var hall = firstFreeHallOfType(date, ordered[p].id, wantType, session.hallId, session.id);
+        if (hall) return { date: date, periodId: ordered[p].id, hallId: hall.id };
+      }
+    }
+    return null;
+  }
+
+  // صندوق تحذير النقل بين نوعي قاعة (v2.3) — يُضمَّن في نماذج
+  // تغيير القاعة؛ يظهر عند اختيار قاعة من نوع مختلف ويطلب تأكيداً
+  // صريحاً بخانة اختيار قبل السماح بالحفظ.
+  function crossTypeWarnHtml() {
+    return '<div class="hall-type-warn" data-cross-type-warn hidden>' +
+      '<strong>تحذير: نقل إلى نوع قاعة مختلف</strong>' +
+      '<div data-cross-type-detail></div>' +
+      '<label class="check-row" style="margin-top:8px"><input type="checkbox" name="crossTypeConfirm"> أؤكد النقل إلى قاعة من نوع مختلف</label></div>';
+  }
+  // يربط صندوق التحذير بقائمة القاعات في النموذج؛ تُعيد دالة حارس
+  // تُستدعى عند الحفظ (true = مسموح: نفس النوع أو مؤكد صراحةً).
+  function bindCrossTypeGuard(modalEl, currentHallId) {
+    var sel = modalEl.querySelector('[name="hallId"]');
+    var warnEl = modalEl.querySelector('[data-cross-type-warn]');
+    var detailEl = modalEl.querySelector('[data-cross-type-detail]');
+    var confirmBox = modalEl.querySelector('[name="crossTypeConfirm"]');
+    var formEl = modalEl.querySelector('form') || modalEl;
+    if (!sel || !warnEl) return function () { return true; };
+    var currentHall = currentHallId ? App.Store.get('halls', currentHallId) : null;
+    function refresh() {
+      var targetId = sel.value || null;
+      var target = targetId ? App.Store.get('halls', targetId) : null;
+      var cross = !!(currentHall && target && targetId !== currentHallId &&
+        hallTypeOf(currentHall) !== hallTypeOf(target));
+      warnEl.hidden = !cross;
+      if (cross && detailEl) {
+        detailEl.textContent = 'القاعة الحالية (' + currentHall.name + ') من نوع ' +
+          hallTypeLabel(hallTypeOf(currentHall)) + '، والقاعة المختارة (' + target.name + ') من نوع ' +
+          hallTypeLabel(hallTypeOf(target)) + ' — قد لا تناسب متطلبات مجموعة التدريب.';
+      }
+      if (!cross && confirmBox) confirmBox.checked = false;
+      return cross;
+    }
+    sel.addEventListener('change', refresh);
+    refresh();
+    return function () {
+      if (!refresh()) return true;
+      if (confirmBox && confirmBox.checked) return true;
+      UI.formError(formEl, 'أكّد النقل إلى قاعة من نوع مختلف بوضع علامة في خانة التأكيد');
+      return false;
+    };
+  }
+
+  // قائمة توفر القاعات (نمط v2.2 hallAvailabilityListHtml + نوع القاعة).
+  function hallAvailabilityListHtmlV23(rows, isSelfHall) {
+    if (!rows.length) return 'لا قاعات مسجلة.';
+    return rows.map(function (r) {
+      var hall = App.Store.get('halls', r.hallId);
+      var typeTag = hall ? ' <span class="muted">(' + hallTypeLabel(hallTypeOf(hall)) + ')</span>' : '';
+      var self = isSelfHall ? isSelfHall(r) : false;
+      if (r.free || self) {
+        return '<div>' + UI.escapeHtml(r.hallName) + typeTag + ' <span class="pill pill-green">متاحة</span></div>';
+      }
+      return '<div>' + UI.escapeHtml(r.hallName) + typeTag + ' <span class="pill pill-red">مشغولة' +
+        (r.sessionCourse ? ' — ' + UI.escapeHtml(r.sessionCourse) : '') + '</span></div>';
+    }).join('');
+  }
+
   // ---------- مكوّن الحضور (يُستخدم داخل تفاصيل الدورة ونافذة الجلسة) ----------
   // opts: { embedded: true } — داخل بطاقة موجودة مسبقاً.
   function renderAttendanceBlock(container, sessionId, opts) {
@@ -29,6 +224,10 @@
     }
     var course = App.Store.get('courses', session.courseId);
     var canWrite = App.canWrite();
+    // قفل التحرير (v2.3): يوم الجلسة + اليوم التالي فقط، للجميع
+    // بلا استثناء (بتوقيت دمشق) — قفل واجهة فقط.
+    var attLocked = isAttendanceLocked(session.date);
+    var canEditAtt = canWrite && !attLocked;
     container.innerHTML = UI.loadingState('جارٍ تحميل الحضور…');
 
     window.TadreebDB.getSessionAttendance(sessionId).then(function (attMap) {
@@ -49,12 +248,15 @@
       html += '<div id="att-summary"></div>';
       // لوحة إحصاءات الجلسة (v2.1 — بند 10): بطاقات حضور + تخصيص + تصدير.
       html += '<div id="att-stats-panel"></div>';
+      if (attLocked) {
+        html += '<div class="att-lock-note">الحضور مغلق — انتهت مهلة التعديل (يوم واحد بعد الجلسة). تُعرض السجلات للقراءة فقط.</div>';
+      }
 
       // حضور المدرب
       if (trainer) {
         html += '<div class="att-row"><div><strong>المدرب: ' + UI.escapeHtml(trainer.name) + '</strong></div>' +
           '<div class="att-choices">';
-        if (canWrite) {
+        if (canEditAtt) {
           html += '<button class="att-choice' + (session.trainerPresent === true ? ' sel-present' : '') + '" type="button" data-trainer-att="present">موجود</button>' +
             '<button class="att-choice' + (session.trainerPresent === false ? ' sel-absent' : '') + '" type="button" data-trainer-att="absent">غائب</button>';
         } else {
@@ -65,7 +267,7 @@
       }
 
       if (!trainees.length) {
-        html += '<div class="muted" style="margin-top:12px">لا متدربين في هذه الدورة.</div>';
+        html += '<div class="muted" style="margin-top:12px">لا متدربين في مجموعة التدريب هذه.</div>';
       } else {
         html += '<div style="margin-top:6px">';
         trainees.forEach(function (t) {
@@ -74,17 +276,21 @@
           html += '<div class="att-row" data-att-row="' + UI.escapeHtml(t.id) + '">' +
             '<div><strong>' + UI.escapeHtml(t.name) + '</strong>' +
             '<div class="muted">' + UI.escapeHtml(App.directorateName(t.directorateId) || 'بلا مديرية') + '</div></div>';
-          if (canWrite) {
+          var legacy = isLegacyAttStatus(status);
+          if (canEditAtt) {
+            // v2.3: ثلاثة خيارات فقط — موجود / غائب / ملغي.
             html += '<div class="att-choices">' +
               '<button class="att-choice' + (status === 'present' ? ' sel-present' : '') + '" type="button" data-att="present">موجود</button>' +
               '<button class="att-choice' + (status === 'absent' ? ' sel-absent' : '') + '" type="button" data-att="absent">غائب</button>' +
-              '<button class="att-choice' + (status === 'excused' ? ' sel-excused' : '') + '" type="button" data-att="excused">معتذر</button>' +
+              '<button class="att-choice' + (status === 'cancelled' ? ' sel-cancelled' : '') + '" type="button" data-att="cancelled">ملغي</button>' +
               // مسح التسجيل (إعادة إلى «بلا تسجيل») — يظهر عند وجود
               // تسجيل محفوظ أو اختيار محلي؛ يُحفظ مع زر «حفظ الحضور».
               '<button class="link-btn" type="button" data-att-clear' + (status ? '' : ' hidden') + '>مسح التسجيل</button>' +
               '</div>' +
-              '<div class="att-note-wrap"' + (status === 'excused' ? '' : ' hidden') + '>' +
-              '<input type="text" class="att-note" data-att-note placeholder="مبرر الاعتذار (مطلوب عند الاعتذار)" value="' + UI.escapeHtml(rec.note || '') + '"></div>';
+              // سجل إرثي (معتذر/لم يحضر): يُعرض بتسميته الأصلية
+              // ولا يُختار؛ اختيار أحد الخيارات الثلاثة يستبدله.
+              (legacy ? '<div class="att-legacy" data-legacy-badge>' + UI.pillForAttendance(status) +
+                (rec.note ? ' <span class="muted" style="font-size:13px">المبرر: ' + UI.escapeHtml(rec.note) + '</span>' : '') + '</div>' : '');
           } else {
             html += '<div>' + UI.pillForAttendance(status) +
               (rec.note ? '<div class="muted" style="font-size:13px">المبرر: ' + UI.escapeHtml(rec.note) + '</div>' : '') + '</div>';
@@ -92,11 +298,11 @@
           html += '</div>';
         });
         html += '</div>';
-        if (canWrite) {
+        if (canEditAtt) {
           html += '<div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">' +
             '<button class="btn" type="button" id="att-save-btn">حفظ الحضور</button>' +
             '<button class="btn btn-outline" type="button" id="att-all-present-btn">تحديد الكل موجوداً</button></div>' +
-            '<div class="muted" style="margin-top:8px">يمكن تسجيل الحضور وتصحيحه لأي جلسة — سابقة أو قادمة — ومسح تسجيل خاطئ بزر «مسح التسجيل» بجانب المتدرب، وتُسجَّل كل التغييرات في سجل التدقيق.</div>';
+            '<div class="muted" style="margin-top:8px">يمكن تسجيل الحضور وتصحيحه حتى نهاية اليوم التالي للجلسة، ثم يُغلق الحضور. ويمكن مسح تسجيل خاطئ بزر «مسح التسجيل» بجانب المتدرب، وتُسجَّل كل التغييرات في سجل التدقيق.</div>';
         }
       }
 
@@ -137,12 +343,14 @@
         }
       }
       function summaryHtml(stateMap) {
-        var groups = { present: [], absent: [], excused: [], none: [] };
+        var groups = { present: [], absent: [], excused: [], didNotAttend: [], cancelled: [], none: [] };
         trainees.forEach(function (t) {
           var st = (stateMap[t.id] || {}).status || null;
           if (st === 'present') groups.present.push(t);
           else if (st === 'absent') groups.absent.push(t);
           else if (st === 'excused') groups.excused.push(t);
+          else if (st === 'did-not-attend') groups.didNotAttend.push(t);
+          else if (st === 'cancelled') groups.cancelled.push(t);
           else groups.none.push(t);
         });
         function groupHtml(title, list, withNote) {
@@ -163,7 +371,9 @@
         }
         out += groupHtml('الحاضرون', groups.present, false);
         out += groupHtml('الغائبون', groups.absent, false);
+        out += groupHtml('الملغاة', groups.cancelled, false);
         out += groupHtml('المعتذرون', groups.excused, true);
+        if (groups.didNotAttend.length) out += groupHtml('لم يحضر', groups.didNotAttend, false);
         out += groupHtml('بلا تسجيل', groups.none, false);
         out += '</div>';
         return out;
@@ -179,7 +389,7 @@
         if (notesBox) container._notesDestroy = UI.notesWidget('session', sessionId, notesBox, { canWrite: canWrite });
       }
 
-      if (!canWrite) {
+      if (!canEditAtt) {
         renderSummary(attMap);
         return;
       }
@@ -194,18 +404,18 @@
 
       container.querySelectorAll('[data-att-row]').forEach(function (row) {
         var traineeId = row.getAttribute('data-att-row');
-        var noteWrap = row.querySelector('.att-note-wrap');
-        var noteInput = row.querySelector('[data-att-note]');
+        var legacyBadge = row.querySelector('[data-legacy-badge]');
         var clearBtn = row.querySelector('[data-att-clear]');
         row.querySelectorAll('[data-att]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var status = btn.getAttribute('data-att');
             local[traineeId].status = status;
+            local[traineeId].note = '';
             row.querySelectorAll('[data-att]').forEach(function (b) {
-              b.classList.remove('sel-present', 'sel-absent', 'sel-excused');
+              b.classList.remove('sel-present', 'sel-absent', 'sel-cancelled');
             });
-            btn.classList.add(status === 'present' ? 'sel-present' : status === 'absent' ? 'sel-absent' : 'sel-excused');
-            if (noteWrap) noteWrap.hidden = status !== 'excused';
+            btn.classList.add(status === 'present' ? 'sel-present' : status === 'absent' ? 'sel-absent' : 'sel-cancelled');
+            if (legacyBadge) legacyBadge.hidden = true;
             if (clearBtn) clearBtn.hidden = false;
             renderSummary(local);
           });
@@ -214,30 +424,26 @@
           clearBtn.addEventListener('click', function () {
             local[traineeId] = { status: null, note: '' };
             row.querySelectorAll('[data-att]').forEach(function (b) {
-              b.classList.remove('sel-present', 'sel-absent', 'sel-excused');
+              b.classList.remove('sel-present', 'sel-absent', 'sel-cancelled');
             });
-            if (noteWrap) noteWrap.hidden = true;
-            if (noteInput) noteInput.value = '';
+            if (legacyBadge) legacyBadge.hidden = true;
             clearBtn.hidden = true;
             renderSummary(local);
           });
-        }
-        if (noteInput) {
-          noteInput.addEventListener('input', function () { local[traineeId].note = noteInput.value.trim(); renderSummary(local); });
         }
       });
 
       var allPresentBtn = container.querySelector('#att-all-present-btn');
       if (allPresentBtn) {
         allPresentBtn.addEventListener('click', function () {
-          trainees.forEach(function (t) { local[t.id].status = 'present'; });
+          trainees.forEach(function (t) { local[t.id] = { status: 'present', note: '' }; });
           container.querySelectorAll('[data-att-row]').forEach(function (row) {
             row.querySelectorAll('[data-att]').forEach(function (b) {
               b.classList.toggle('sel-present', b.getAttribute('data-att') === 'present');
-              b.classList.remove('sel-absent', 'sel-excused');
+              b.classList.remove('sel-absent', 'sel-cancelled');
             });
-            var wrap = row.querySelector('.att-note-wrap');
-            if (wrap) wrap.hidden = true;
+            var badge = row.querySelector('[data-legacy-badge]');
+            if (badge) badge.hidden = true;
             var cb = row.querySelector('[data-att-clear]');
             if (cb) cb.hidden = false;
           });
@@ -259,15 +465,6 @@
       var saveBtn = container.querySelector('#att-save-btn');
       if (saveBtn) {
         saveBtn.addEventListener('click', function () {
-          // التحقق: المعتذر يحتاج مبرراً.
-          var missing = [];
-          trainees.forEach(function (t) {
-            if (local[t.id].status === 'excused' && !local[t.id].note) missing.push(t.name);
-          });
-          if (missing.length) {
-            UI.toast('اكتب مبرر الاعتذار لكل معتذر: ' + missing.join('، '), 'error');
-            return;
-          }
           UI.setBtnLoading(saveBtn, true, 'جارٍ الحفظ…');
           var chain = Promise.resolve();
           var changed = 0;
@@ -329,6 +526,11 @@
         '<div class="meta-box"><div class="k">الحالة</div><div class="v">' + UI.pillForSessionState(session.state) + '</div></div>' +
         '</div>' +
         (session.note ? '<div class="card-white" style="margin-bottom:18px"><strong>ملاحظة الجلسة:</strong> ' + UI.escapeHtml(session.note) + '</div>' : '') +
+        // v2.3: جلسة تتعارض مع عطلة سُجلت بعد جدولتها — تُعرض
+        // إعادة الجدولة مباشرة من التفاصيل.
+        ((session.state === 'scheduled' || session.state === 'done') && isHolidayDate(session.date) ?
+          '<div class="sess-holiday-banner">تنبيه: تاريخ هذه الجلسة يوم عطلة مسجلة. ' +
+          '<button class="link-btn" type="button" id="sess-reschedule-btn">إعادة جدولة الجلسة</button></div>' : '') +
         ((session.splitFrom || session.splitInto) ?
           '<div class="card-white" style="margin-bottom:18px">جزء من جلسة مقسومة' +
           (App.Store.get('sessions', session.splitFrom || session.splitInto) ?
@@ -339,7 +541,7 @@
           '<button class="btn btn-outline btn-sm" type="button" id="sess-state-btn">تغيير الحالة</button>' +
           '<button class="btn btn-outline btn-sm" type="button" id="sess-hall-btn">تغيير القاعة</button>' +
           '<button class="btn btn-outline btn-sm" type="button" id="sess-note-btn">ملاحظة الجلسة</button>' +
-          '<button class="btn btn-outline btn-sm" type="button" id="sess-course-btn">فتح الدورة</button>' +
+          '<button class="btn btn-outline btn-sm" type="button" id="sess-course-btn">فتح مجموعة التدريب</button>' +
           '<button class="btn btn-outline btn-sm" type="button" id="sess-export-btn">تصدير الحضور ↓</button>' +
           '</div>' : ''),
       actions: [{ label: 'إغلاق', className: 'btn-outline', closeOnClick: true }],
@@ -348,6 +550,13 @@
 
     renderAttendanceBlock(modal.element.querySelector('#sess-att-block'), sessionId, {});
     var notesDestroy = UI.notesWidget('session', sessionId, modal.element.querySelector('#sess-notes-box'), { canWrite: canWrite });
+
+    // إعادة جدولة جلسة متعارضة مع عطلة (v2.3).
+    var rescheduleBtn = modal.element.querySelector('#sess-reschedule-btn');
+    if (rescheduleBtn) rescheduleBtn.addEventListener('click', function () {
+      modal.close();
+      setTimeout(function () { openPostponeModal(sessionId); }, 50);
+    });
 
     // إجراءات الجلسة (تُعيد فتح النافذة بعد الحفظ)
     function reopen() {
@@ -377,13 +586,15 @@
     });
     var hallBtn = modal.element.querySelector('#sess-hall-btn');
     if (hallBtn) hallBtn.addEventListener('click', function () {
+      var hallGuard = null;
       var hm = UI.openFormModal('تغيير قاعة الجلسة',
         '<div class="field"><label>القاعة</label><select name="hallId"><option value="">بدون قاعة</option>' +
         App.Store.getAll('halls').map(function (h) {
-          return '<option value="' + UI.escapeHtml(h.id) + '"' + (session.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
-        }).join('') + '</select><div class="field-hint" id="sess-hall-avail">جارٍ فحص توفر القاعات…</div></div>',
+          return '<option value="' + UI.escapeHtml(h.id) + '"' + (session.hallId === h.id ? ' selected' : '') + '>' + UI.escapeHtml(hallOptionLabel(h)) + '</option>';
+        }).join('') + '</select><div class="field-hint" id="sess-hall-avail">جارٍ فحص توفر القاعات…</div></div>' + crossTypeWarnHtml(),
         function (form, close2, btn2) {
           var hallId = form.querySelector('[name="hallId"]').value || null;
+          if (hallGuard && !hallGuard()) return;
           UI.setBtnLoading(btn2, true);
           // عبر updateSession (لا update العام) ليفحص التعارض قبل الحفظ.
           window.TadreebDB.updateSession(sessionId, { hallId: hallId }).then(function () {
@@ -394,6 +605,7 @@
             reopen();
           }).catch(function (err) { UI.setBtnLoading(btn2, false); UI.toastError(err); });
         }, { submitLabel: 'حفظ', width: 'normal' });
+      if (hm.element) hallGuard = bindCrossTypeGuard(hm.element, session.hallId);
       window.TadreebDB.checkHallAvailability(session.date, session.periodId).then(function (rows) {
         if (!hm.element || !hm.element.isConnected) return;
         var el = hm.element.querySelector('#sess-hall-avail');
@@ -445,6 +657,179 @@
     });
   }
 
+  // ---------- تأجيل ذكي (v2.3) ----------
+  // وضعان: يدوي (افتراضي — نفس حقول التأجيل السابقة: التاريخ +
+  // الفترة + القاعة + الملاحظة، مع شرائح فترات بالتوفر وقائمة
+  // توفر القاعات) وتلقائي (يبحث عن أقرب موعد حر مطابق: الفترة
+  // نفسها أولاً، قاعة من النوع نفسه، تخطّي العطل الأسبوعية
+  // والمسجلة). دالة مستقلة لتصل إليها ورقة الإجراءات وشارة العطلة
+  // في التفاصيل. الحفظ عبر postponeSession دائماً (فيتحقق من
+  // العطلة والتعارض قبل الكتابة).
+  function openPostponeModal(sessionId) {
+    var session = App.Store.get('sessions', sessionId);
+    if (!session) { UI.toast('الجلسة غير موجودة', 'error'); return; }
+    var currentHall = session.hallId ? App.Store.get('halls', session.hallId) : null;
+    var wantType = currentHall ? hallTypeOf(currentHall) : null;
+    var autoResult = null;
+
+    function ppPeriodOptions(selectedId) {
+      return App.Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); }).map(function (p) {
+        return '<option value="' + UI.escapeHtml(p.id) + '"' + (p.id === selectedId ? ' selected' : '') + '>' +
+          UI.escapeHtml(App.displayCode(p, 'periods') + ' — ' + p.label) + ' (' + UI.escapeHtml(periodRange12(p)) + ')</option>';
+      }).join('');
+    }
+    function ppHallOptions(selectedId) {
+      return '<option value="">بدون قاعة</option>' + App.Store.getAll('halls').map(function (h) {
+        return '<option value="' + UI.escapeHtml(h.id) + '"' + (h.id === selectedId ? ' selected' : '') + '>' + UI.escapeHtml(hallOptionLabel(h)) + '</option>';
+      }).join('');
+    }
+
+    var fields = '<div class="field"><label>طريقة التأجيل</label>' +
+      '<label class="check-row"><input type="radio" name="postponeMode" value="manual" checked> يدوي — أختار التاريخ والفترة والقاعة</label>' +
+      '<label class="check-row"><input type="radio" name="postponeMode" value="auto"> تلقائي — أقرب موعد متاح' +
+      (wantType ? ' (قاعة ' + hallTypeLabel(wantType) + ')' : '') + '</label></div>' +
+      '<div id="postpone-manual">' +
+      '<div class="form-grid">' +
+      '<div class="field"><label>التاريخ الجديد *</label><input type="date" name="date" required value="' + UI.escapeHtml(session.date) + '"></div>' +
+      '<div class="field"><label>الفترة *</label><select name="periodId" required>' + ppPeriodOptions(session.periodId) + '</select></div>' +
+      '</div>' +
+      '<div class="field"><label>الفترات في اليوم المختار</label><div id="postpone-period-chips" class="pp-chips"></div></div>' +
+      '<div class="field"><label>القاعة</label><select name="hallId">' + ppHallOptions(session.hallId) + '</select><div class="field-hint" id="sheet-postpone-avail"></div><div id="postpone-hall-list" class="pp-hall-list"></div></div>' +
+      '</div>' +
+      '<div id="postpone-auto" hidden>' +
+      '<div class="muted" style="margin-bottom:10px">يبحث النظام عن أقرب موعد متاح بدءاً من الغد: الفترة نفسها أولاً' +
+      (wantType ? '، في قاعة ' + hallTypeLabel(wantType) : '') + '، مع تخطّي العطل الأسبوعية والمسجلة.</div>' +
+      '<button class="btn btn-outline" type="button" id="postpone-auto-search">بحث عن أقرب موعد متاح</button>' +
+      '<div id="postpone-auto-result" class="pp-auto-result" hidden></div>' +
+      '</div>' +
+      '<div class="field" style="margin-top:14px"><label>ملاحظة (اختياري)</label><textarea name="note"></textarea></div>';
+
+    var m = UI.openFormModal('تأجيل الجلسة', fields, function (form, close2, btn2) {
+      var mode = form.querySelector('[name="postponeMode"]:checked').value;
+      var note = form.querySelector('[name="note"]').value.trim();
+      var date, periodId, hallId;
+      if (mode === 'auto') {
+        if (!autoResult) { UI.formError(form, 'ابحث أولاً عن أقرب موعد متاح'); return; }
+        date = autoResult.date; periodId = autoResult.periodId; hallId = autoResult.hallId;
+      } else {
+        date = form.querySelector('[name="date"]').value;
+        periodId = form.querySelector('[name="periodId"]').value;
+        hallId = form.querySelector('[name="hallId"]').value || null;
+        if (!date) { UI.formError(form, 'اختر تاريخ الجلسة'); return; }
+        if (!periodId) { UI.formError(form, 'اختر الفترة'); return; }
+      }
+      UI.formError(form, '');
+      UI.setBtnLoading(btn2, true);
+      window.TadreebDB.postponeSession(sessionId, date, periodId, hallId, note).then(function () {
+        UI.setBtnLoading(btn2, false);
+        close2();
+        UI.toast('تم تأجيل الجلسة', 'success');
+        App.refresh();
+      }).catch(function (err) { UI.setBtnLoading(btn2, false); UI.formError(form, err.message); });
+    }, { submitLabel: 'تأجيل الجلسة' });
+    if (!m.element) return;
+    var card = m.element;
+    var dateInput = card.querySelector('[name="date"]');
+    var periodSel = card.querySelector('[name="periodId"]');
+    var hallSel = card.querySelector('[name="hallId"]');
+    var chipsEl = card.querySelector('#postpone-period-chips');
+    var availEl = card.querySelector('#sheet-postpone-avail');
+    var hallListEl = card.querySelector('#postpone-hall-list');
+
+    // شرائح الفترات لليوم المختار: التوفر من المخزن المحلي (قاعات
+    // حرة من النوع المطابق). النقر على شريحة يختار فترتها.
+    function renderChips() {
+      var date = dateInput.value;
+      if (!chipsEl) return;
+      if (!date) { chipsEl.innerHTML = ''; return; }
+      if (isHolidayDate(date)) {
+        chipsEl.innerHTML = '<span class="muted">هذا اليوم عطلة مسجلة — لا جلسات.</span>';
+        return;
+      }
+      if (weekendDays().indexOf(weekdayOf(date)) !== -1) {
+        chipsEl.innerHTML = '<span class="muted">هذا اليوم عطلة أسبوعية — لا جلسات.</span>';
+        return;
+      }
+      var periods = App.Store.getAll('periods').slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+      chipsEl.innerHTML = periods.map(function (p) {
+        var busy = slotOccupants(date, p.id, sessionId);
+        var freeCount = App.Store.getAll('halls').filter(function (h) {
+          return !busy[h.id] && (!wantType || hallTypeOf(h) === wantType);
+        }).length;
+        var free = freeCount > 0;
+        return '<button type="button" class="pp-chip' + (p.id === periodSel.value ? ' active' : '') + (free ? '' : ' busy') +
+          '" data-pp-period="' + UI.escapeHtml(p.id) + '">' +
+          '<span class="pp-chip-label">' + UI.escapeHtml(p.label) + '</span>' +
+          '<span class="pp-chip-status">' + (free ? '✓ متاح (' + freeCount + ')' : '✕ محجوز') + '</span></button>';
+      }).join('');
+      chipsEl.querySelectorAll('[data-pp-period]').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          periodSel.value = chip.getAttribute('data-pp-period');
+          renderChips();
+          checkAvail();
+        });
+      });
+    }
+
+    // فحص توفر القاعات عند تغيير التاريخ أو الفترة؛ قاعة الجلسة
+    // نفسها لا تُعطَّل في موعدها الحالي. نص التلميح كما كان تماماً.
+    function checkAvail() {
+      var date = dateInput.value;
+      var periodId = periodSel.value;
+      if (!date || !periodId) { if (availEl) availEl.textContent = ''; if (hallListEl) hallListEl.innerHTML = ''; return; }
+      if (availEl) availEl.textContent = 'جارٍ فحص توفر القاعات…';
+      window.TadreebDB.checkHallAvailability(date, periodId).then(function (rows) {
+        var isSelfSlot = (date === session.date && periodId === session.periodId);
+        var isSelfHall = function (r) { return isSelfSlot && r.hallId === session.hallId; };
+        var free = rows.filter(function (r) { return r.free || isSelfHall(r); }).map(function (r) { return r.hallName; });
+        var busy = rows.filter(function (r) { return !r.free && !isSelfHall(r); }).map(function (r) { return r.hallName + ' (' + r.sessionCourse + ')'; });
+        if (availEl) availEl.textContent = 'متاحة: ' + (free.length ? free.join('، ') : 'لا قاعة حرة') +
+          (busy.length ? ' — مشغولة: ' + busy.join('، ') : '');
+        if (hallListEl) hallListEl.innerHTML = hallAvailabilityListHtmlV23(rows, isSelfHall);
+        if (hallSel) hallSel.querySelectorAll('option[value]').forEach(function (opt) {
+          if (!opt.value) return;
+          var row = rows.find(function (r) { return r.hallId === opt.value; });
+          opt.disabled = !!(row && !row.free && !isSelfHall(row));
+        });
+      }).catch(function () { if (availEl) availEl.textContent = ''; });
+    }
+
+    var manualEl = card.querySelector('#postpone-manual');
+    var autoEl = card.querySelector('#postpone-auto');
+    card.querySelectorAll('[name="postponeMode"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        var auto = card.querySelector('[name="postponeMode"]:checked').value === 'auto';
+        if (manualEl) manualEl.hidden = auto;
+        if (autoEl) autoEl.hidden = !auto;
+      });
+    });
+
+    var autoResultEl = card.querySelector('#postpone-auto-result');
+    var searchBtn = card.querySelector('#postpone-auto-search');
+    if (searchBtn) searchBtn.addEventListener('click', function () {
+      var slot = findNextFreeSlot(session);
+      autoResult = slot;
+      if (!autoResultEl) return;
+      autoResultEl.hidden = false;
+      if (!slot) {
+        autoResultEl.innerHTML = '<div class="pp-auto-none">لا يوجد موعد متاح خلال الأسابيع الثمانية القادمة — جرّب الاختيار اليدوي.</div>';
+        return;
+      }
+      var p = App.Store.get('periods', slot.periodId);
+      var h = App.Store.get('halls', slot.hallId);
+      autoResultEl.innerHTML = '<div class="pp-auto-found"><strong>أقرب موعد متاح:</strong> ' +
+        UI.escapeHtml(UI.fmtDateFull(slot.date)) + ' · ' + UI.escapeHtml(p ? p.label : '') +
+        (p ? ' (' + UI.escapeHtml(periodRange12(p)) + ')' : '') +
+        ' · ' + UI.escapeHtml(h ? h.name : 'بلا قاعة') +
+        '<div class="muted" style="margin-top:6px">اضغط «تأجيل الجلسة» للتأكيد.</div></div>';
+    });
+
+    dateInput.addEventListener('change', function () { renderChips(); checkAvail(); });
+    periodSel.addEventListener('change', function () { renderChips(); checkAvail(); });
+    renderChips();
+    checkAvail();
+  }
+
   // ---------- ورقة إجراءات الجلسة (قائمة مشتركة من الرزنامة ولوحة المعلومات وتفاصيل الدورة) ----------
   // opts: { onCheck: function(sessionId) } — اختياري؛ عند غيابه يفتح «تفقد» نافذة التفاصيل.
   function openActionSheet(sessionId, opts) {
@@ -471,7 +856,7 @@
       actions.push({ key: 'edit', label: 'تعديل الجلسة' });
       actions.push({ key: 'delete', label: 'حذف الجلسة', danger: true });
     }
-    actions.push({ key: 'course', label: 'فتح الدورة' });
+    actions.push({ key: 'course', label: 'فتح مجموعة التدريب' });
     actions.push({ key: 'export', label: 'تصدير الحضور ↓' });
 
     var splitOtherId = session.splitFrom || session.splitInto || null;
@@ -556,11 +941,14 @@
         }, { submitLabel: 'تأكيد الإلغاء', width: 'normal' });
     }
 
+    // دمج جلستين (v2.3 — تحقق 18 تشرين الثاني 2026): mergeSessions
+    // يدمج الحضور (حاضر > معتذر > غائب) ثم يحذف الجلسة المُزالة،
+    // فيبقى جلسة واحدة — نص النافذة أدناه يطابق السلوك فعلاً.
     function doMerge() {
       var others = App.Store.getAll('sessions').filter(function (s) {
         return s.courseId === session.courseId && s.id !== sessionId;
       }).sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
-      if (!others.length) { UI.toast('لا توجد جلسات أخرى في هذه الدورة للدمج'); return; }
+      if (!others.length) { UI.toast('لا توجد جلسات أخرى في مجموعة التدريب هذه للدمج'); return; }
       var rowsHtml = others.map(function (s) {
         var p = App.Store.get('periods', s.periodId);
         return '<button class="sheet-action" type="button" data-merge-pick="' + UI.escapeHtml(s.id) + '">' +
@@ -602,7 +990,7 @@
 
     function hallOptionsHtml(selectedId) {
       return '<option value="">بدون قاعة</option>' + App.Store.getAll('halls').map(function (h) {
-        return '<option value="' + UI.escapeHtml(h.id) + '"' + (h.id === selectedId ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(h, 'halls') + ' — ' + h.name) + '</option>';
+        return '<option value="' + UI.escapeHtml(h.id) + '"' + (h.id === selectedId ? ' selected' : '') + '>' + UI.escapeHtml(hallOptionLabel(h)) + '</option>';
       }).join('');
     }
 
@@ -635,29 +1023,7 @@
     }
 
     function doPostpone() {
-      var fields = '<div class="form-grid">' +
-        '<div class="field"><label>التاريخ الجديد *</label><input type="date" name="date" required value="' + UI.escapeHtml(session.date) + '"></div>' +
-        '<div class="field"><label>الفترة *</label><select name="periodId" required>' + periodOptionsHtml(session.periodId) + '</select></div>' +
-        '<div class="field field-full"><label>القاعة</label><select name="hallId">' + hallOptionsHtml(session.hallId) + '</select><div class="field-hint" id="sheet-postpone-avail"></div></div>' +
-        '<div class="field field-full"><label>ملاحظة (اختياري)</label><textarea name="note"></textarea></div>' +
-        '</div>';
-      var m = UI.openFormModal('تأجيل الجلسة', fields, function (form, close2, btn2) {
-        var date = form.querySelector('[name="date"]').value;
-        var periodId = form.querySelector('[name="periodId"]').value;
-        var hallId = form.querySelector('[name="hallId"]').value || null;
-        var note = form.querySelector('[name="note"]').value.trim();
-        if (!date) { UI.formError(form, 'اختر تاريخ الجلسة'); return; }
-        if (!periodId) { UI.formError(form, 'اختر الفترة'); return; }
-        UI.formError(form, '');
-        UI.setBtnLoading(btn2, true);
-        window.TadreebDB.postponeSession(sessionId, date, periodId, hallId, note).then(function () {
-          UI.setBtnLoading(btn2, false);
-          close2();
-          UI.toast('تم تأجيل الجلسة', 'success');
-          App.refresh();
-        }).catch(function (err) { UI.setBtnLoading(btn2, false); UI.formError(form, err.message); });
-      }, { submitLabel: 'تأجيل الجلسة' });
-      if (m.element) bindHallAvailability(m.element, 'sheet-postpone-avail');
+      openPostponeModal(sessionId);
     }
 
     // تقسيم الجلسة: الجزء الثاني في فترة أخرى من اليوم نفسه أو في يوم آخر.
@@ -846,10 +1212,12 @@
     }
 
     function doHall() {
+      var hallGuard = null;
       var hm = UI.openFormModal('تغيير قاعة الجلسة',
-        '<div class="field"><label>القاعة</label><select name="hallId">' + hallOptionsHtml(session.hallId) + '</select><div class="field-hint" id="sheet-hall-avail">جارٍ فحص توفر القاعات…</div></div>',
+        '<div class="field"><label>القاعة</label><select name="hallId">' + hallOptionsHtml(session.hallId) + '</select><div class="field-hint" id="sheet-hall-avail">جارٍ فحص توفر القاعات…</div></div>' + crossTypeWarnHtml(),
         function (form, close2, btn2) {
           var hallId = form.querySelector('[name="hallId"]').value || null;
+          if (hallGuard && !hallGuard()) return;
           UI.setBtnLoading(btn2, true);
           // عبر updateSession (لا update العام) ليفحص التعارض قبل الحفظ.
           window.TadreebDB.updateSession(sessionId, { hallId: hallId }).then(function () {
@@ -859,6 +1227,7 @@
             App.refresh();
           }).catch(function (err) { UI.setBtnLoading(btn2, false); UI.toastError(err); });
         }, { submitLabel: 'حفظ', width: 'normal' });
+      if (hm.element) hallGuard = bindCrossTypeGuard(hm.element, session.hallId);
       window.TadreebDB.checkHallAvailability(session.date, session.periodId).then(function (rows) {
         if (!hm.element || !hm.element.isConnected) return;
         var el = hm.element.querySelector('#sheet-hall-avail');
@@ -928,5 +1297,5 @@
     }
   }
 
-  window.SessionScreen = { open: open, openActionSheet: openActionSheet, renderAttendanceBlock: renderAttendanceBlock };
+  window.SessionScreen = { open: open, openActionSheet: openActionSheet, renderAttendanceBlock: renderAttendanceBlock, openPostponeModal: openPostponeModal, isAttendanceLocked: isAttendanceLocked };
 })();

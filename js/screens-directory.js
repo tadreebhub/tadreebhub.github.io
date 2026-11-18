@@ -6,6 +6,10 @@
 (function () {
   'use strict';
 
+  // نتيجة آخر استيراد للمديريات — تُحفظ هنا لأن تحديث المتجر يعيد
+  // رسم الشاشة فيمحو الملخص من DOM؛ render() تعيد عرضه.
+  var lastDirectorateImport = null;
+
   function render(container) {
     var Store = App.Store;
     var canWrite = App.canWrite();
@@ -47,7 +51,10 @@
 
     // المديريات — قائمة مرتبة
     html += '<div class="card-white"><div class="section-title-row"><h2>المديريات (' + directorates.length + ')</h2>' +
-      (canWrite ? '<button class="btn btn-sm" type="button" data-add="directorate">إضافة مديرية</button>' : '') + '</div>';
+      (canWrite ? '<span class="dir-import-row"><button class="btn btn-outline btn-sm" type="button" id="dir-directorates-import-btn">استيراد من Excel</button><button class="btn btn-sm" type="button" data-add="directorate">إضافة مديرية</button></span>' : '') + '</div>' +
+      (canWrite ? '<input type="file" id="dir-directorates-import-file" accept=".xlsx" hidden>' +
+      '<div class="field-hint">ملف ‎.xlsx: العمود الأول اسم المديرية. تُتخطى الأسماء المكررة والصفوف الفارغة.</div>' +
+      '<div id="dir-directorates-import-summary" class="excel-import-summary dir-import-summary" hidden></div>' : '');
     if (!directorates.length) {
       html += UI.emptyState('لا مديريات مسجلة');
     } else {
@@ -71,7 +78,7 @@
     html += '<div class="card-white"><div class="section-title-row"><h2>المجموعات التدريبية (' + groups.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-sm" type="button" data-add="group">إضافة مجموعة</button>' : '') + '</div>';
     if (!groups.length) {
-      html += UI.emptyState('لا مجموعات تدريبية مسجلة', 'المجموعة تنتمي إلى مديرية وتُعيَّن لدورة.');
+      html += UI.emptyState('لا مجموعات تدريبية مسجلة', 'المجموعة تنتمي إلى مديرية وتُعيَّن لمجموعة تدريب.');
     } else {
       groups.forEach(function (g) {
         var courseCount = Store.getAll('courses').filter(function (c) { return c.groupId === g.id; }).length;
@@ -92,9 +99,10 @@
     halls.forEach(function (h) {
       var todayCount = Store.getAll('sessions').filter(function (s) { return s.hallId === h.id && s.date === UI.todayStr(); }).length;
       html += listRow(
-        '<strong>' + UI.escapeHtml(h.name) + '</strong> ' + codePill(h, 'halls'),
+        '<strong>' + UI.escapeHtml(h.name) + '</strong> ' + codePill(h, 'halls') + ' ' + hallTypeBadge(h),
         (h.capacity != null ? 'السعة: ' + countLabel(h.capacity, COUNT_FORMS.trainees) + ' · ' : '') +
-          countLabel(todayCount, COUNT_FORMS.sessions) + ' اليوم',
+          countLabel(todayCount, COUNT_FORMS.sessions) + ' اليوم' +
+          (h.equipment ? ' · التجهيزات: ' + UI.escapeHtml(h.equipment) : ''),
         actionRow('hall', h.id, canWrite));
     });
     html += '</div>';
@@ -103,7 +111,7 @@
     html += '<div class="card-white"><div class="section-title-row"><h2>المتدربون (' + trainees.length + ')</h2>' +
       (canWrite ? '<button class="btn btn-sm" type="button" data-add="trainee">إضافة متدرب</button>' : '') + '</div>';
     if (!trainees.length) {
-      html += UI.emptyState('لا متدربين مسجلين', 'أضف المتدربين هنا أو أثناء إنشاء دورة جديدة.', canWrite ? 'إضافة متدرب' : null, 'dir-empty-trainee');
+      html += UI.emptyState('لا متدربين مسجلين', 'أضف المتدربين هنا أو أثناء إنشاء مجموعة تدريب جديدة.', canWrite ? 'إضافة متدرب' : null, 'dir-empty-trainee');
     } else {
       // البحث بالاسم (إخفاء/إظهار صفوف DOM دون إعادة رسم — كقائمة الدورات).
       html += '<input type="text" class="input" id="dir-trainee-search" placeholder="ابحث بالاسم…" style="width:100%;margin-bottom:8px" aria-label="البحث في المتدربين">' +
@@ -127,6 +135,13 @@
     }
 
     container.innerHTML = html;
+
+    // ملخص آخر استيراد للمديريات (v2.3 — N) — يُعاد عرضه بعد إعادة
+    // رسم الشاشة (تحديث المتجر يعيد الرسم فيمحو الملخص).
+    var dirImpSummaryEl = container.querySelector('#dir-directorates-import-summary');
+    if (dirImpSummaryEl && lastDirectorateImport && UI.renderDirectorateImportSummary) {
+      UI.renderDirectorateImportSummary(dirImpSummaryEl, lastDirectorateImport);
+    }
 
     // لوحة إحصاءات الدليل (v2.1 — بند 10) — تُرسم بعد innerHTML؛
     // زر تصديرها يفتح نافذة خيارات بنطاق واحد (مصنف واحد لكل
@@ -188,6 +203,30 @@
       });
     });
 
+    // استيراد المديريات من إكسل (v2.3 — N).
+    var dirImpBtn = document.getElementById('dir-directorates-import-btn');
+    var dirImpFile = document.getElementById('dir-directorates-import-file');
+    var dirImpSummary = document.getElementById('dir-directorates-import-summary');
+    if (dirImpBtn && dirImpFile && UI.runDirectorateExcelImport) {
+      dirImpBtn.addEventListener('click', function () { dirImpFile.click(); });
+      dirImpFile.addEventListener('change', function () {
+        var file = dirImpFile.files && dirImpFile.files[0];
+        dirImpFile.value = '';
+        if (!file) return;
+        UI.runDirectorateExcelImport(file, {
+          summaryEl: dirImpSummary,
+          buttonEl: dirImpBtn,
+          existingNames: function () {
+            return App.Store.getAll('directorates').map(function (d) { return d.name; });
+          },
+          onAdded: function (newIds, result) {
+            lastDirectorateImport = result;
+            render(container);
+          }
+        });
+      });
+    }
+
     document.getElementById('dir-export-btn').addEventListener('click', function () {
       UI.openPicker({
         title: 'تصدير الدليل',
@@ -227,10 +266,25 @@
     return '<span class="pill pill-grey">' + UI.escapeHtml(App.displayCode(item, collection)) + '</span>';
   }
 
+  // نوع القاعة (v2.3 — W3): 'computer' (حاسوب) أو 'admin' (إدارية)؛
+  // قاعة بلا حقل نوع تُعامل كإدارية (توافق رجعي).
+  function hallTypeOfHall(h) {
+    if (window.TadreebDB && typeof window.TadreebDB.hallTypeOf === 'function') {
+      return window.TadreebDB.hallTypeOf(h);
+    }
+    return (h && h.hallType === 'computer') ? 'computer' : 'admin';
+  }
+
+  function hallTypeBadge(h) {
+    return hallTypeOfHall(h) === 'computer' ?
+      '<span class="pill pill-gold">حاسوب</span>' :
+      '<span class="pill pill-navy">إدارية</span>';
+  }
+
   // صياغة العدد بالفصحى: 0 «لا …»، 1 مفرد، 2 مثنى، 3–10 جمع،
   // 11+ مفرد منصوب. forms = {one, two, few, many}.
   var COUNT_FORMS = {
-    courses: { one: 'دورة واحدة', two: 'دورتان', few: 'دورات', many: 'دورة' },
+    courses: { one: 'مجموعة تدريب واحدة', two: 'مجموعتا تدريب', few: 'مجموعات تدريب', many: 'مجموعة تدريب' },
     groups: { one: 'مجموعة واحدة', two: 'مجموعتان', few: 'مجموعات', many: 'مجموعة' },
     trainees: { one: 'متدرب واحد', two: 'متدربان', few: 'متدربين', many: 'متدرباً' },
     members: { one: 'عضو واحد', two: 'عضوان', few: 'أعضاء', many: 'عضواً' },
@@ -289,7 +343,9 @@
   // المجموعات القديمة بلا الحقل تُعامل كقائمة أعضاء فارغة) ----------
   function memberLabel(t) {
     var code = (typeof App.displayCode === 'function') ? App.displayCode(t, 'trainees') : '';
-    return code ? code + ' — ' + (t.name || '') : (t.name || '');
+    var base = code ? code + ' — ' + (t.name || '') : (t.name || '');
+    var dn = App.directorateName(t.directorateId);
+    return dn ? base + ' · ' + dn : base;
   }
 
   // صفوف قائمة الأعضاء: خانة اختيار لكل متدرب في الدليل؛ في نموذج
@@ -318,8 +374,12 @@
     var isEdit = !!item.id;
     return '<div class="field"><label>الأعضاء</label>' +
       '<div class="check-list" id="grp-members-list">' + groupMemberRowsHtml(selected, isEdit) + '</div>' +
-      '<div style="margin-top:8px"><button class="btn btn-outline btn-sm" type="button" id="grp-add-trainee-btn">إضافة متدرب جديد</button></div>' +
-      '<div class="field-hint">أعضاء المجموعة هم من يُستخدمون في التفقد والتصدير عند تعيين المجموعة لدورة. يمكن ترك المجموعة بلا أعضاء.</div></div>';
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-outline btn-sm" type="button" id="grp-add-trainee-btn">إضافة متدرب جديد</button>' +
+      '<button class="btn btn-outline btn-sm" type="button" id="grp-excel-btn">إضافة من Excel</button>' +
+      '<input type="file" id="grp-excel-file" accept=".xlsx" hidden></div>' +
+      '<div class="excel-import"><div class="field-hint">ملف ‎.xlsx: العمود الأول اسم المتدرب والثاني رقم هاتفه. تُترك المديرية فارغة ويمكن تعديلها لاحقاً من بطاقة المتدرب.</div>' +
+      '<div id="grp-excel-summary" class="excel-import-summary" hidden></div></div>' +
+      '<div class="field-hint">أعضاء المجموعة هم من يُستخدمون في التفقد والتصدير عند تعيين المجموعة لمجموعة تدريب. يمكن ترك المجموعة بلا أعضاء.</div></div>';
   }
 
   function selectedMemberIds(form) {
@@ -332,11 +392,13 @@
 
   // إعادة رسم قائمة الأعضاء داخل نموذج المجموعة المفتوح (بعد إضافة
   // متدرب جديد أو تعديل أحدهم) مع الحفاظ على المحدد، وتحديد الجديد.
+  // extraCheckedId: معرّف واحد أو مصفوفة معرّفات (الاستيراد من إكسل).
   function renderGroupMembersList(form, isEdit, extraCheckedId) {
     var list = form.querySelector('#grp-members-list');
     if (!list) return;
     var selected = new Set(selectedMemberIds(form));
-    if (extraCheckedId) selected.add(extraCheckedId);
+    if (Array.isArray(extraCheckedId)) extraCheckedId.forEach(function (id) { selected.add(id); });
+    else if (extraCheckedId) selected.add(extraCheckedId);
     list.innerHTML = groupMemberRowsHtml(selected, isEdit);
   }
 
@@ -370,6 +432,104 @@
         });
       });
     }
+    // استيراد الأعضاء من إكسل (v2.3 — M): يُنشئ المتدربين الصالحين
+    // ويحددهم أعضاءً في القائمة؛ الحفظ يتم مع حفظ المجموعة.
+    var excelBtn = form.querySelector('#grp-excel-btn');
+    var excelFile = form.querySelector('#grp-excel-file');
+    var excelSummary = form.querySelector('#grp-excel-summary');
+    if (excelBtn && excelFile && UI.runTraineeExcelImport) {
+      excelBtn.addEventListener('click', function () { excelFile.click(); });
+      excelFile.addEventListener('change', function () {
+        var file = excelFile.files && excelFile.files[0];
+        excelFile.value = '';
+        if (!file) return;
+        UI.runTraineeExcelImport(file, {
+          summaryEl: excelSummary,
+          buttonEl: excelBtn,
+          existingPhones: function () {
+            var phones = [];
+            selectedMemberIds(form).forEach(function (id) {
+              var t = App.Store.get('trainees', id);
+              if (t && t.phone) phones.push(t.phone);
+            });
+            return phones;
+          },
+          onAdded: function (newIds) { renderGroupMembersList(form, isEdit, newIds); }
+        });
+      });
+    }
+  }
+
+  // خيارات مديرية المتدرب (المحفوظة + إضافة سريعة) — تُستخدم في نموذج
+  // المتدرب وعند إعادة بنائها بعد إضافة مديرية سريعاً.
+  function traineeDirectorateOptionsHtml(selectedId) {
+    var html = '<option value="">اختر المديرية</option>';
+    App.Store.getAll('directorates').slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+    }).forEach(function (d) {
+      html += '<option value="' + UI.escapeHtml(d.id) + '"' + (d.id === selectedId ? ' selected' : '') + '>' +
+        UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
+    });
+    html += '<option value="__new__">إضافة مديرية جديدة +</option>';
+    return html;
+  }
+
+  // إضافة مديرية سريعة من نموذج المتدرب (v2.3 — N): نافذة صغيرة
+  // (الاسم + المعرّف التلقائي) ثم يُختار الجديد فوراً في قائمة
+  // المديرية. onSaved(newId) بعد الحفظ وتحديث المتجر؛ onCancelled
+  // عند الإغلاق دون حفظ ليعيد المستدعي قائمته إلى قيمتها السابقة.
+  function openDirectorateQuickAdd(onSaved, onCancelled) {
+    var saved = false;
+    var fields = '<div class="field"><label>اسم المديرية *</label><input type="text" name="name" required></div>' +
+      '<div class="field"><label>المعرّف *</label><input type="text" name="code" required value="' +
+      UI.escapeHtml(App.nextCode('directorates')) + '"></div>';
+    UI.openFormModal('إضافة مديرية', fields, function (form, close, submitBtn) {
+      var name = form.querySelector('[name="name"]').value.trim();
+      var code = form.querySelector('[name="code"]').value.trim();
+      if (!name) { UI.formError(form, 'الاسم مطلوب'); return; }
+      if (!code) { UI.formError(form, 'المعرّف مطلوب'); return; }
+      if (!App.isCodeUnique('directorates', code, null)) {
+        UI.formError(form, 'هذا المعرّف مستخدم من قبل — اختر معرّفاً آخر');
+        return;
+      }
+      UI.formError(form, '');
+      UI.setBtnLoading(submitBtn, true);
+      window.TadreebDB.add('directorates', { name: name, code: code }).then(function (newId) {
+        saved = true;
+        UI.setBtnLoading(submitBtn, false);
+        close();
+        UI.toast('تمت إضافة المديرية', 'success');
+        var done = function () { if (typeof onSaved === 'function') onSaved(newId); };
+        var rp = App.refresh();
+        if (rp && typeof rp.then === 'function') rp.then(done, done);
+        else done();
+      }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.formError(form, err.message); });
+    }, {
+      submitLabel: 'إضافة',
+      width: 'normal',
+      onClose: function () {
+        if (!saved && typeof onCancelled === 'function') onCancelled();
+      }
+    });
+  }
+
+  // ربط قائمة مديرية المتدرب في نموذج إضافة/تعديل المتدرب:
+  // خيار «إضافة مديرية جديدة +» يفتح الإضافة السريعة.
+  function wireTraineeDirectorate(modalEl) {
+    var form = modalEl.querySelector('form');
+    var sel = form ? form.querySelector('[name="directorateId"]') : null;
+    if (!sel) return;
+    var prev = sel.value;
+    sel.addEventListener('change', function () {
+      if (sel.value !== '__new__') { prev = sel.value; return; }
+      openDirectorateQuickAdd(function (newId) {
+        sel.innerHTML = traineeDirectorateOptionsHtml(newId);
+        sel.value = newId;
+        prev = newId;
+      }, function () {
+        sel.value = prev;
+      });
+    });
   }
 
   function formFieldsFor(type, item) {
@@ -383,7 +543,13 @@
       case 'hall':
         return '<div class="field"><label>اسم القاعة *</label><input type="text" name="name" required value="' + UI.escapeHtml(item.name || '') + '"></div>' +
           codeFieldFor(type, item) +
-          '<div class="field"><label>السعة (عدد المتدربين)</label><input type="number" name="capacity" min="0" value="' + UI.escapeHtml(item.capacity == null ? '' : item.capacity) + '"></div>';
+          '<div class="field"><label>نوع القاعة</label><select name="hallType">' +
+          '<option value="admin"' + (hallTypeOfHall(item) !== 'computer' ? ' selected' : '') + '>إدارية</option>' +
+          '<option value="computer"' + (hallTypeOfHall(item) === 'computer' ? ' selected' : '') + '>حاسوب</option></select>' +
+          '<div class="field-hint">مجموعات التدريب التقنية تُسند تلقائياً إلى قاعات الحاسوب، والإدارية إلى القاعات الإدارية.</div></div>' +
+          '<div class="field"><label>السعة (عدد المتدربين)</label><input type="number" name="capacity" min="0" value="' + UI.escapeHtml(item.capacity == null ? '' : item.capacity) + '"></div>' +
+          '<div class="field"><label>التجهيزات / ملاحظات</label><input type="text" name="equipment" value="' + UI.escapeHtml(item.equipment || '') + '" placeholder="مثال: 20 جهاز حاسوب">' +
+          '<div class="field-hint">عدد الأجهزة لقاعة الحاسوب، أو أي تجهيزات وملاحظات أخرى.</div></div>';
       case 'directorate':
         return '<div class="field"><label>اسم المديرية *</label><input type="text" name="name" required value="' + UI.escapeHtml(item.name || '') + '"></div>' +
           codeFieldFor(type, item);
@@ -399,10 +565,8 @@
       case 'trainee':
         return '<div class="field"><label>الاسم *</label><input type="text" name="name" required value="' + UI.escapeHtml(item.name || '') + '"></div>' +
           codeFieldFor(type, item) +
-          '<div class="field"><label>المديرية</label><select name="directorateId"><option value="">اختر المديرية</option>' +
-          App.Store.getAll('directorates').map(function (d) {
-            return '<option value="' + UI.escapeHtml(d.id) + '"' + (item.directorateId === d.id ? ' selected' : '') + '>' + UI.escapeHtml(App.displayCode(d, 'directorates') + ' — ' + d.name) + '</option>';
-          }).join('') + '</select></div>' +
+          '<div class="field"><label>المديرية</label><select name="directorateId">' +
+          traineeDirectorateOptionsHtml(item.directorateId) + '</select></div>' +
           '<div class="field"><label>رقم الهاتف</label><input type="text" name="phone" value="' + UI.escapeHtml(item.phone || '') + '"></div>' +
           '<div class="field"><label>ملاحظات</label><textarea name="notes">' + UI.escapeHtml(item.notes || '') + '</textarea></div>';
       default:
@@ -419,7 +583,13 @@
       case 'trainer': return { name: v('name'), code: v('code'), specialty: v('specialty'), phone: v('phone') };
       case 'hall': {
         var cap = form.querySelector('[name="capacity"]').value;
-        return { name: v('name'), code: v('code'), capacity: cap === '' ? null : parseInt(cap, 10) };
+        var hallTypeEl = form.querySelector('[name="hallType"]');
+        return {
+          name: v('name'), code: v('code'),
+          capacity: cap === '' ? null : parseInt(cap, 10),
+          hallType: (hallTypeEl && hallTypeEl.value === 'computer') ? 'computer' : 'admin',
+          equipment: v('equipment')
+        };
       }
       case 'directorate': return { name: v('name'), code: v('code') };
       case 'group': return {
@@ -435,7 +605,7 @@
       case 'trainee': return {
         name: v('name'),
         code: v('code'),
-        directorateId: form.querySelector('[name="directorateId"]').value || null,
+        directorateId: (function () { var dv = form.querySelector('[name="directorateId"]').value; return (dv && dv !== '__new__') ? dv : null; })(),
         phone: v('phone'),
         notes: v('notes')
       };
@@ -484,6 +654,7 @@
       }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.formError(form, err.message); });
     }, { submitLabel: 'إضافة', width: 'normal' });
     if (type === 'group' && modal && modal.element) wireGroupMembers(modal.element, false);
+    if (type === 'trainee' && modal && modal.element) wireTraineeDirectorate(modal.element);
   }
 
   function openEditModal(type, id, opts) {
@@ -509,6 +680,7 @@
       }).catch(function (err) { UI.setBtnLoading(submitBtn, false); UI.formError(form, err.message); });
     }, { submitLabel: 'حفظ التعديلات', width: 'normal' });
     if (type === 'group' && modal && modal.element) wireGroupMembers(modal.element, true);
+    if (type === 'trainee' && modal && modal.element) wireTraineeDirectorate(modal.element);
   }
 
   function deleteEntity(type, id) {
@@ -520,7 +692,7 @@
     if (type === 'group') {
       var groupCourseCount = App.Store.getAll('courses').filter(function (c) { return c.groupId === id; }).length;
       if (groupCourseCount) {
-        UI.toast('لا يمكن حذف هذه المجموعة — معيّنة في ' + groupCourseCount + ' دورة', 'error');
+        UI.toast('لا يمكن حذف هذه المجموعة — معيّنة في ' + groupCourseCount + ' مجموعة تدريب', 'error');
         return;
       }
     }
@@ -528,7 +700,7 @@
     var warning = '';
     if (type === 'trainer') {
       var used = App.Store.getAll('courses').filter(function (c) { return c.trainerId === id; }).length;
-      if (used) warning = ' هذا المدرب معيّن في ' + used + ' دورة — ستظهر تلك الدورات بلا مدرب.';
+      if (used) warning = ' هذا المدرب معيّن في ' + used + ' مجموعة تدريب — ستظهر مجموعات التدريب تلك بلا مدرب.';
     }
     if (type === 'hall') {
       var sessCount = App.Store.getAll('sessions').filter(function (s) { return s.hallId === id; }).length;
@@ -543,7 +715,7 @@
     }
     if (type === 'trainee') {
       var courseCount = App.Store.getAll('courses').filter(function (c) { return (c.traineeIds || []).indexOf(id) !== -1; }).length;
-      if (courseCount) warning = ' هذا المتدرب مسجل في ' + courseCount + ' دورة — سيُزال منها تلقائياً عند حذف سجله.';
+      if (courseCount) warning = ' هذا المتدرب مسجل في ' + courseCount + ' مجموعة تدريب — سيُزال منها تلقائياً عند حذف سجله.';
       var memberGroupCount = App.Store.getAll('groups').filter(function (g) { return (g.traineeIds || []).indexOf(id) !== -1; }).length;
       if (memberGroupCount) warning += ' وهو عضو في ' + memberGroupCount + ' مجموعة — سيُزال منها أيضاً.';
     }
@@ -597,7 +769,7 @@
       { id: 'name', label: 'المدرب' },
       { id: 'code', label: 'المعرّف' },
       { id: 'specialty', label: 'التخصص' },
-      { id: 'courses', label: 'عدد الدورات' },
+      { id: 'courses', label: 'عدد مجموعات التدريب' },
       { id: 'sessions', label: 'عدد الجلسات' },
       { id: 'hours', label: 'إجمالي الساعات' },
       { id: 'feeDue', label: 'الأجور المستحقة (ل.س)' }
@@ -607,7 +779,7 @@
       { id: 'code', label: 'المعرّف' },
       { id: 'directorate', label: 'المديرية' },
       { id: 'members', label: 'عدد الأعضاء' },
-      { id: 'courses', label: 'عدد الدورات' },
+      { id: 'courses', label: 'عدد مجموعات التدريب' },
       { id: 'sessions', label: 'عدد الجلسات' }
     ],
     directorates: [
@@ -615,7 +787,7 @@
       { id: 'code', label: 'المعرّف' },
       { id: 'trainees', label: 'عدد المتدربين' },
       { id: 'groups', label: 'عدد المجموعات' },
-      { id: 'courses', label: 'عدد الدورات' },
+      { id: 'courses', label: 'عدد مجموعات التدريب' },
       { id: 'sessions', label: 'عدد الجلسات' }
     ],
     halls: [
@@ -649,7 +821,7 @@
     { id: 'name', label: 'الاسم' },
     { id: 'code', label: 'المعرّف' },
     { id: 'specialty', label: 'التخصص' },
-    { id: 'courses', label: 'عدد الدورات' },
+    { id: 'courses', label: 'عدد مجموعات التدريب' },
     { id: 'sessions', label: 'عدد الجلسات' },
     { id: 'hours', label: 'إجمالي الساعات' },
     { id: 'feeDue', label: 'الأجور المستحقة (ل.س)' },

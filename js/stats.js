@@ -40,6 +40,16 @@
     try { return A.Store.get(collection, id) || null; } catch (e) { return null; }
   }
 
+  // الاسم المعروض لمجموعة التدريب (المخصص أو التلقائي) — عبر App
+  // عند توفره، وإلا اسم الدورة (المنهج).
+  function groupDisplayName(course) {
+    var A = app();
+    if (course && A && typeof A.groupDisplayName === 'function') {
+      try { return A.groupDisplayName(course); } catch (e) { /* احتياطي أدناه */ }
+    }
+    return (course && course.name) || '';
+  }
+
   function db() {
     try {
       if (typeof window !== 'undefined' && window.TadreebDB) return window.TadreebDB;
@@ -126,7 +136,7 @@
    * format: num = رقم بفواصل، money = مبلغ بعملة ل.س، pct = نسبة مئوية، text = نص. */
   var METRIC_DEFS = {
     dashboard: [
-      { id: 'activeCourses', label: 'دورات نشطة', format: 'num' },
+      { id: 'activeCourses', label: 'مجموعات تدريب نشطة', format: 'num' },
       { id: 'todaySessions', label: 'جلسات اليوم', format: 'num' },
       { id: 'weekAttendanceRate', label: 'نسبة الحضور هذا الأسبوع', format: 'pct' },
       { id: 'trainees', label: 'متدرب مسجل', format: 'num' },
@@ -139,7 +149,7 @@
       { id: 'budgetRemaining', label: 'المتبقي من الميزانيات', format: 'money' }
     ],
     courses: [
-      { id: 'total', label: 'عدد الدورات', format: 'num' },
+      { id: 'total', label: 'عدد مجموعات التدريب', format: 'num' },
       { id: 'active', label: 'جارية', format: 'num' },
       { id: 'completed', label: 'مكتملة', format: 'num' },
       { id: 'cancelled', label: 'ملغاة', format: 'num' },
@@ -196,26 +206,26 @@
       { id: 'directorates', label: 'مديريات', format: 'num' },
       { id: 'groups', label: 'مجموعات تدريبية', format: 'num' },
       { id: 'halls', label: 'قاعات', format: 'num' },
-      { id: 'trainersWithoutCourses', label: 'مدربون بلا دورات', format: 'num' },
-      { id: 'groupsWithoutCourses', label: 'مجموعات بلا دورات', format: 'num' },
-      { id: 'traineesWithoutCourse', label: 'متدربون بلا دورة', format: 'num' }
+      { id: 'trainersWithoutCourses', label: 'مدربون بلا مجموعات تدريب', format: 'num' },
+      { id: 'groupsWithoutCourses', label: 'مجموعات غير معيّنة', format: 'num' },
+      { id: 'traineesWithoutCourse', label: 'متدربون بلا مجموعة تدريب', format: 'num' }
     ],
     trainees: [
       { id: 'total', label: 'إجمالي المتدربين', format: 'num' },
-      { id: 'inCourses', label: 'مسجلون في دورات', format: 'num' },
-      { id: 'withoutCourse', label: 'بلا دورة', format: 'num' },
+      { id: 'inCourses', label: 'مسجلون في مجموعات تدريب', format: 'num' },
+      { id: 'withoutCourse', label: 'بلا مجموعة تدريب', format: 'num' },
       { id: 'topDirectorate', label: 'المديرية الأكثر متدربين', format: 'text' }
     ],
     trainers: [
       { id: 'total', label: 'عدد المدربين', format: 'num' },
-      { id: 'withCourses', label: 'مدربون لهم دورات', format: 'num' },
-      { id: 'withoutCourses', label: 'مدربون بلا دورات', format: 'num' },
+      { id: 'withCourses', label: 'مدربون لهم مجموعات تدريب', format: 'num' },
+      { id: 'withoutCourses', label: 'مدربون بلا مجموعات تدريب', format: 'num' },
       { id: 'totalSessions', label: 'إجمالي الجلسات', format: 'num' },
       { id: 'totalHours', label: 'إجمالي الساعات', format: 'num' },
       { id: 'totalFeesDue', label: 'إجمالي الأجور المستحقة', format: 'money' }
     ],
     trainer: [
-      { id: 'courses', label: 'عدد الدورات', format: 'num' },
+      { id: 'courses', label: 'عدد مجموعات التدريب', format: 'num' },
       { id: 'sessions', label: 'عدد الجلسات', format: 'num' },
       { id: 'hours', label: 'إجمالي الساعات', format: 'num' },
       { id: 'trainees', label: 'عدد المتدربين', format: 'num' },
@@ -225,25 +235,25 @@
       { id: 'total', label: 'عدد المديريات', format: 'num' },
       { id: 'trainees', label: 'إجمالي المتدربين', format: 'num' },
       { id: 'groups', label: 'إجمالي المجموعات', format: 'num' },
-      { id: 'courses', label: 'إجمالي الدورات', format: 'num' },
+      { id: 'courses', label: 'إجمالي مجموعات التدريب', format: 'num' },
       { id: 'topDirectorate', label: 'المديرية الأكثر متدربين', format: 'text' }
     ],
     directorate: [
       { id: 'trainees', label: 'عدد المتدربين', format: 'num' },
       { id: 'groups', label: 'عدد المجموعات', format: 'num' },
-      { id: 'courses', label: 'عدد الدورات', format: 'num' },
+      { id: 'courses', label: 'عدد مجموعات التدريب', format: 'num' },
       { id: 'sessions', label: 'عدد الجلسات', format: 'num' }
     ],
     groups: [
       { id: 'total', label: 'عدد المجموعات', format: 'num' },
       { id: 'members', label: 'إجمالي الأعضاء', format: 'num' },
-      { id: 'courses', label: 'إجمالي الدورات', format: 'num' },
+      { id: 'courses', label: 'إجمالي مجموعات التدريب', format: 'num' },
       { id: 'emptyGroups', label: 'مجموعات بلا أعضاء', format: 'num' },
-      { id: 'groupsWithoutCourses', label: 'مجموعات بلا دورات', format: 'num' }
+      { id: 'groupsWithoutCourses', label: 'مجموعات غير معيّنة', format: 'num' }
     ],
     group: [
       { id: 'members', label: 'عدد الأعضاء', format: 'num' },
-      { id: 'courses', label: 'عدد الدورات', format: 'num' },
+      { id: 'courses', label: 'عدد مجموعات التدريب', format: 'num' },
       { id: 'sessions', label: 'عدد الجلسات', format: 'num' },
       { id: 'attendanceRate', label: 'نسبة الحضور', format: 'pct' }
     ],
@@ -260,7 +270,7 @@
       { id: 'meetings', label: 'عدد الاجتماعات', format: 'num' },
       { id: 'occupancy', label: 'نسبة الإشغال', format: 'pct' },
       { id: 'capacity', label: 'السعة', format: 'num' },
-      { id: 'courses', label: 'عدد الدورات', format: 'num' }
+      { id: 'courses', label: 'عدد مجموعات التدريب', format: 'num' }
     ],
     periods: [
       { id: 'total', label: 'عدد الفترات', format: 'num' },
@@ -270,9 +280,9 @@
     ],
     levels: [
       { id: 'total', label: 'عدد المستويات', format: 'num' },
-      { id: 'courses', label: 'إجمالي الدورات', format: 'num' },
-      { id: 'withoutLevel', label: 'دورات بلا مستوى', format: 'num' },
-      { id: 'topLevel', label: 'المستوى الأكثر دورات', format: 'text' }
+      { id: 'courses', label: 'إجمالي مجموعات التدريب', format: 'num' },
+      { id: 'withoutLevel', label: 'مجموعات تدريب بلا مستوى', format: 'num' },
+      { id: 'topLevel', label: 'المستوى الأكثر مجموعات تدريب', format: 'text' }
     ],
     holidays: [
       { id: 'total', label: 'عدد العطل', format: 'num' },
@@ -286,7 +296,7 @@
       { id: 'avgExpense', label: 'متوسط المصروف', format: 'money' },
       { id: 'categoriesCount', label: 'عدد الفئات المستخدمة', format: 'num' },
       { id: 'topCategory', label: 'الفئة الأعلى صرفاً', format: 'text' },
-      { id: 'topCourse', label: 'الدورة الأعلى صرفاً', format: 'text' }
+      { id: 'topCourse', label: 'مجموعة التدريب الأعلى صرفاً', format: 'text' }
     ],
     budget: [
       { id: 'allocated', label: 'الميزانية المخصصة', format: 'money' },
@@ -406,7 +416,7 @@
     storeAll('courses').forEach(function (c) {
       try {
         A.courseTrainees(c).forEach(function (t) { if (t && t.id) set[t.id] = true; });
-      } catch (e) { /* دورة بلا متدربين */ }
+      } catch (e) { /* مجموعة تدريب بلا متدربين */ }
     });
     return set;
   }
@@ -545,7 +555,7 @@
     };
   }
 
-  /* ---------- 2. الدورات (متزامن؛ نسبة الحضور تُملأ من buildCoursesStatsData) ---------- */
+  /* ---------- 2. مجموعات التدريب (متزامن؛ نسبة الحضور تُملأ من buildCoursesStatsData) ---------- */
   function computeCourses() {
     var courses = storeAll('courses');
     var counts = { active: 0, completed: 0, cancelled: 0, paused: 0 };
@@ -626,7 +636,7 @@
     };
   }
 
-  /* ---------- 3. دورة واحدة (متزامن؛ نسبة الحضور عبر courseAttendance) ---------- */
+  /* ---------- 3. مجموعة تدريب واحدة (متزامن؛ نسبة الحضور عبر courseAttendance) ---------- */
   function computeCourse(courseId) {
     var course = storeGet('courses', courseId);
     var A = app();
@@ -660,19 +670,25 @@
   }
 
   /* ---------- 4. جلسة واحدة — من خريطة حضور محمّلة (متزامن تماماً) ----------
-   * attMap: {traineeId: {status: 'present'|'absent'|'excused', note}} كما
-   * تُعيد TadreebDB.getSessionAttendance؛ trainees: قائمة متدربي الدورة؛
+   * attMap: {traineeId: {status, note}} كما تُعيد
+   * TadreebDB.getSessionAttendance؛ trainees: قائمة متدربي الدورة؛
    * trainerPresent: true/false/null. تُستخدم داخل تفقد الجلسة حيث
-   * الخريطة محمّلة أصلاً — بلا أي قراءة إضافية. */
+   * الخريطة محمّلة أصلاً — بلا أي قراءة إضافية.
+   * v2.3 — دلالات العدّ: «معتذر» (إرثي) و«لم يحضر» (إرثي) يُحسبان
+   * ضمن مقام نسبة الحضور (لم يحضرا) ويظهران بعدّيهما الخاصين؛
+   * «ملغي» سجل مُبطل يُستثنى من المقام تماماً ويظهر بعدّ خاص.
+   * presentRate = موجود ÷ (موجود + غائب + معتذر + لم يحضر). */
   function computeSession(attMap, trainees, trainerPresent) {
     attMap = attMap || {};
     trainees = Array.isArray(trainees) ? trainees : [];
-    var present = 0, absent = 0, excused = 0, recorded = 0;
+    var present = 0, absent = 0, excused = 0, didNotAttend = 0, cancelled = 0, recorded = 0;
     trainees.forEach(function (t) {
       var rec = attMap[t.id] || {};
       if (rec.status === 'present') { present++; recorded++; }
       else if (rec.status === 'absent') { absent++; recorded++; }
       else if (rec.status === 'excused') { excused++; recorded++; }
+      else if (rec.status === 'did-not-attend') { didNotAttend++; recorded++; }
+      else if (rec.status === 'cancelled') { cancelled++; }
     });
     var total = trainees.length;
     return {
@@ -681,9 +697,11 @@
         present: present,
         absent: absent,
         excused: excused,
-        unrecorded: Math.max(0, total - recorded),
+        didNotAttend: didNotAttend,
+        cancelled: cancelled,
+        unrecorded: Math.max(0, total - recorded - cancelled),
         presentRate: pct(present, recorded),
-        recordedRate: pct(recorded, total),
+        recordedRate: pct(recorded + cancelled, total),
         trainer: trainerPresent == null ? 'بلا تسجيل' : (trainerPresent ? 'موجود' : 'غائب')
       }
     };
@@ -1146,10 +1164,10 @@
       var courseName = '';
       if (A && e.courseId) {
         var c = storeGet('courses', e.courseId);
-        courseName = c ? c.name : '';
+        courseName = c ? groupDisplayName(c) : '';
       }
       var key = e.courseId || '';
-      if (!byCourseMap[key]) byCourseMap[key] = { courseId: key, course: courseName || 'بلا دورة', count: 0, total: 0 };
+      if (!byCourseMap[key]) byCourseMap[key] = { courseId: key, course: courseName || 'بلا مجموعة تدريب', count: 0, total: 0 };
       byCourseMap[key].count++;
       byCourseMap[key].total += amount;
     });
@@ -1171,7 +1189,7 @@
     };
   }
 
-  /* ---------- 16. ميزانية دورة واحدة ---------- */
+  /* ---------- 16. ميزانية مجموعة تدريب واحدة ---------- */
   function computeBudget(courseId) {
     var b = budgetFor(courseId);
     var topCat = '—', topVal = 0;
@@ -1271,9 +1289,11 @@
 
   // حضور جلسات قائمة (بالتسلسل لتجنب إغراق الطلبات) — تُرجع عدادات
   // + صفاً لكل جلسة. جلسة بلا سجلات تُحسب بلا تسجيل لكل متدربيها.
+  // v2.3 — دلالات العدّ كما في computeSession: «معتذر» و«لم يحضر»
+  // إرثيان يُحسبان ضمن المقام، و«ملغي» مُبطل يُستثنى من المقام.
   function attendanceForSessions(sessions, trainees) {
     var D = db();
-    var counts = { present: 0, absent: 0, excused: 0, recorded: 0 };
+    var counts = { present: 0, absent: 0, excused: 0, didNotAttend: 0, cancelled: 0, recorded: 0 };
     var perSession = [];
     var chain = Promise.resolve();
     var totalTrainees = Array.isArray(trainees) ? trainees.length : 0;
@@ -1282,21 +1302,26 @@
         if (!D || typeof D.getSessionAttendance !== 'function') return {};
         return D.getSessionAttendance(s.id).catch(function () { return {}; });
       }).then(function (attMap) {
-        var c = { present: 0, absent: 0, excused: 0, recorded: 0 };
+        var c = { present: 0, absent: 0, excused: 0, didNotAttend: 0, cancelled: 0, recorded: 0 };
         Object.keys(attMap || {}).forEach(function (tid) {
           var st = attMap[tid].status;
           if (st === 'present') { c.present++; c.recorded++; }
           else if (st === 'absent') { c.absent++; c.recorded++; }
           else if (st === 'excused') { c.excused++; c.recorded++; }
+          else if (st === 'did-not-attend') { c.didNotAttend++; c.recorded++; }
+          else if (st === 'cancelled') { c.cancelled++; }
         });
         counts.present += c.present;
         counts.absent += c.absent;
         counts.excused += c.excused;
+        counts.didNotAttend += c.didNotAttend;
+        counts.cancelled += c.cancelled;
         counts.recorded += c.recorded;
         perSession.push({
           sessionId: s.id, date: s.date || '',
           present: c.present, absent: c.absent, excused: c.excused,
-          unrecorded: Math.max(0, totalTrainees - c.recorded),
+          didNotAttend: c.didNotAttend, cancelled: c.cancelled,
+          unrecorded: Math.max(0, totalTrainees - c.recorded - c.cancelled),
           recorded: c.recorded
         });
       });
@@ -1307,8 +1332,10 @@
         present: counts.present,
         absent: counts.absent,
         excused: counts.excused,
+        didNotAttend: counts.didNotAttend,
+        cancelled: counts.cancelled,
         recorded: counts.recorded,
-        unrecorded: Math.max(0, sessions.length * totalTrainees - counts.recorded),
+        unrecorded: Math.max(0, sessions.length * totalTrainees - counts.recorded - counts.cancelled),
         total: total,
         rate: pct(counts.present, total),
         perSession: perSession
@@ -1362,7 +1389,7 @@
         sessions = sessions.concat(sessionsForCourse(c.id));
       }
     });
-    var counts = { present: 0, absent: 0, excused: 0, recorded: 0 };
+    var counts = { present: 0, absent: 0, excused: 0, didNotAttend: 0, cancelled: 0, recorded: 0 };
     var chain = Promise.resolve();
     sessions.forEach(function (s) {
       chain = chain.then(function () {
@@ -1374,6 +1401,8 @@
         if (rec.status === 'present') { counts.present++; counts.recorded++; }
         else if (rec.status === 'absent') { counts.absent++; counts.recorded++; }
         else if (rec.status === 'excused') { counts.excused++; counts.recorded++; }
+        else if (rec.status === 'did-not-attend') { counts.didNotAttend++; counts.recorded++; }
+        else if (rec.status === 'cancelled') { counts.cancelled++; }
       });
     });
     return chain.then(function () {
@@ -1381,8 +1410,10 @@
         present: counts.present,
         absent: counts.absent,
         excused: counts.excused,
+        didNotAttend: counts.didNotAttend,
+        cancelled: counts.cancelled,
         recorded: counts.recorded,
-        unrecorded: Math.max(0, sessions.length - counts.recorded),
+        unrecorded: Math.max(0, sessions.length - counts.recorded - counts.cancelled),
         total: counts.recorded,
         rate: pct(counts.present, counts.recorded),
         sessions: sessions.length
@@ -1395,19 +1426,20 @@
     var courses = storeAll('courses').slice()
       .sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'ar'); });
     var rows = [];
-    var summary = { present: 0, absent: 0, excused: 0, unrecorded: 0, total: 0 };
+    var summary = { present: 0, absent: 0, excused: 0, cancelled: 0, unrecorded: 0, total: 0 };
     var chain = Promise.resolve();
     courses.forEach(function (c) {
       chain = chain.then(function () {
         return courseAttendance(c.id).then(function (res) {
           rows.push({
-            name: c.name || '', present: res.present, absent: res.absent,
-            excused: res.excused, unrecorded: res.unrecorded,
+            name: groupDisplayName(c), present: res.present, absent: res.absent,
+            excused: res.excused, cancelled: res.cancelled, unrecorded: res.unrecorded,
             total: res.recorded, rate: res.rate
           });
           summary.present += res.present;
           summary.absent += res.absent;
           summary.excused += res.excused;
+          summary.cancelled += res.cancelled;
           summary.unrecorded += res.unrecorded;
           summary.total += res.recorded;
         });
@@ -1415,7 +1447,7 @@
     });
     return chain.then(function () {
       summary.rate = pct(summary.present, summary.total);
-      return { scope: 'courses', scopeLabel: 'حسب الدورة', rows: rows, summary: summary };
+      return { scope: 'courses', scopeLabel: 'حسب مجموعة التدريب', rows: rows, summary: summary };
     });
   }
 
@@ -1423,19 +1455,20 @@
     var groups = storeAll('groups').slice()
       .sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'ar'); });
     var rows = [];
-    var summary = { present: 0, absent: 0, excused: 0, unrecorded: 0, total: 0 };
+    var summary = { present: 0, absent: 0, excused: 0, cancelled: 0, unrecorded: 0, total: 0 };
     var chain = Promise.resolve();
     groups.forEach(function (g) {
       chain = chain.then(function () {
         return groupAttendance(g.id).then(function (res) {
           rows.push({
             name: g.name || '', present: res.present, absent: res.absent,
-            excused: res.excused, unrecorded: res.unrecorded,
+            excused: res.excused, cancelled: res.cancelled, unrecorded: res.unrecorded,
             total: res.recorded, rate: res.rate
           });
           summary.present += res.present;
           summary.absent += res.absent;
           summary.excused += res.excused;
+          summary.cancelled += res.cancelled;
           summary.unrecorded += res.unrecorded;
           summary.total += res.recorded;
         });
@@ -1451,19 +1484,20 @@
     var trainees = storeAll('trainees').slice()
       .sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'ar'); });
     var rows = [];
-    var summary = { present: 0, absent: 0, excused: 0, unrecorded: 0, total: 0 };
+    var summary = { present: 0, absent: 0, excused: 0, cancelled: 0, unrecorded: 0, total: 0 };
     var chain = Promise.resolve();
     trainees.forEach(function (t) {
       chain = chain.then(function () {
         return traineeAttendance(t.id).then(function (res) {
           rows.push({
             name: t.name || '', present: res.present, absent: res.absent,
-            excused: res.excused, unrecorded: res.unrecorded,
+            excused: res.excused, cancelled: res.cancelled, unrecorded: res.unrecorded,
             total: res.recorded, rate: res.rate
           });
           summary.present += res.present;
           summary.absent += res.absent;
           summary.excused += res.excused;
+          summary.cancelled += res.cancelled;
           summary.unrecorded += res.unrecorded;
           summary.total += res.recorded;
         });
@@ -1674,6 +1708,557 @@
     }
   }
 
+  /* ---------- الرسوم البيانية التفاعلية (v2.3 — W5) ----------
+   * رسوم SVG مبنية داخل المنصة (لا مكتبات خارجية ولا CDN).
+   * تُشتق بيانات كل رسم من دوال compute* الموجودة أصلاً أو من
+   * مقاييس اللوحة نفسها — لا منطق عدّ جديد هنا، ولا تُمسّ دوال
+   * العدّ (computeSession وcourseAttendance ملك عامل آخر).
+   * تُرسم الرسوم داخل renderPanel تحت بطاقات المقاييس، وتُحدَّث
+   * عبر refreshCharts عند تغيّر المقاييس (updateMetrics).
+   * التفاعل: النقر/التمرير على عنصر يعرض قيمته في سطر التفاصيل؛
+   * النقر على شريحة فئة مصروف يدرج مصاريفها (التفصيل الوحيد).
+   * الحركة: انتقالات CSS فقط (transform/opacity وخصائص SVG)؛
+   * تُعطَّل كلياً عند prefers-reduced-motion (قسم W5 في styles.css).
+   * الأقسام بلا رسوم: العطل (قائمة تواريخ لا تقبل الرسم) ولوحات
+   * الكيان الواحد (مدرب/مديرية/مجموعة/قاعة — قيمها لا تقارَن). */
+
+  var CHART_PALETTE = ['#081F31', '#1B4F72', '#2E86AB', '#C9A86A', '#5D8AA8', '#7FB3D5', '#1A7A4C', '#B45309'];
+  var CHART_ATT_COLORS = { present: '#2E7D32', absent: '#C62828', excused: '#B45309', unrecorded: '#9E9E9E' };
+  var CHART_STATE_COLORS = {
+    done: '#2E7D32', scheduled: '#081F31', remaining: '#2E86AB', cancelled: '#C62828',
+    holiday: '#9E9E9E', trainerAbsent: '#B45309', meetings: '#5D8AA8',
+    active: '#2E7D32', completed: '#1B4F72', paused: '#B45309'
+  };
+
+  function fmtChartValue(format, value) {
+    if (format === 'money') {
+      var U = ui();
+      if (U && typeof U.fmtMoney === 'function') { try { return U.fmtMoney(value); } catch (e) {} }
+      return asNum(value).toLocaleString('en-US') + ' ل.س';
+    }
+    if (format === 'pct') return asNum(value) + '%';
+    return asNum(value).toLocaleString('en-US');
+  }
+
+  // نسخة مختصرة للمبالغ داخل الرسم (التفصيل الكامل يظهر عند النقر).
+  function fmtChartValueShort(format, value) {
+    if (format !== 'money') return fmtChartValue(format, value);
+    var v = asNum(value);
+    if (v >= 1000000) return (Math.round(v / 100000) / 10) + ' مليون ل.س';
+    if (v >= 1000) return (Math.round(v / 100) / 10) + ' ألف ل.س';
+    return fmtChartValue('money', v);
+  }
+
+  // أيام نطاق YYYY-MM-DD كقائمة تواريخ (سقف 366 يوماً).
+  function monthDays(from, to) {
+    var days = [];
+    var d = from;
+    var guard = 0;
+    while (d && d <= to && guard++ < 366) {
+      days.push(d);
+      var parts = d.split('-');
+      var dt = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+      dt.setDate(dt.getDate() + 1);
+      d = dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2) + '-' + ('0' + dt.getDate()).slice(-2);
+    }
+    return days;
+  }
+
+  // إعدادات رسوم القسم: [{kind: 'bar'|'donut'|'line', title, items: [{label, value, color?}],
+  // format?, unit?, drill?}]. items فارغة أو كلها صفر → رسالة «لا بيانات».
+  function chartConfigs(section, spec) {
+    spec = spec || {};
+    var metrics = spec.metrics || {};
+    function m(id) { return asNum(metrics[id]); }
+    function itemsFromMetrics(pairs) {
+      return pairs.map(function (p) {
+        return { label: p[1], value: m(p[0]), color: p[2] || '' };
+      });
+    }
+    function topItems(rows, labelKey, valueKey, n) {
+      return rows.slice().sort(function (a, b) { return asNum(b[valueKey]) - asNum(a[valueKey]); })
+        .slice(0, n || 6).map(function (r) {
+          return { label: r[labelKey] || '', value: asNum(r[valueKey]) };
+        });
+    }
+    switch (section) {
+      case 'dashboard': {
+        var dash = computeDashboard();
+        var range = currentMonthRange();
+        var days = monthDays(range.from, range.to);
+        var perDay = {};
+        (dash.sessions || []).forEach(function (s) {
+          if (!occupies(s)) return;
+          perDay[s.date] = (perDay[s.date] || 0) + 1;
+        });
+        var U = ui();
+        var lineItems = days.map(function (d) {
+          var label = d;
+          if (U && typeof U.fmtDateFull === 'function') { try { label = U.fmtDateFull(d); } catch (e) {} }
+          return { label: label, short: String(+d.slice(8, 10)), value: perDay[d] || 0 };
+        });
+        return [
+          { kind: 'line', title: 'الجلسات عبر أيام الشهر الحالي', items: lineItems, format: 'num', unit: 'جلسة' },
+          { kind: 'donut', title: 'الميزانية: المصروف مقابل المتبقي', format: 'money', items: [
+            { label: 'المصروف', value: m('totalSpent'), color: '#1B4F72' },
+            { label: 'المتبقي', value: Math.max(0, m('budgetRemaining')), color: '#C9A86A' }
+          ] }
+        ];
+      }
+      case 'courses': {
+        var courseRows = storeAll('courses').map(function (c) {
+          return { name: c.name || '', sessions: sessionsForCourse(c.id).filter(occupies).length };
+        });
+        return [
+          { kind: 'bar', title: 'الجلسات لكل مجموعة تدريب', items: topItems(courseRows, 'name', 'sessions', 6), format: 'num', unit: 'جلسة' },
+          { kind: 'donut', title: 'مجموعات التدريب حسب الحالة', items: itemsFromMetrics([
+            ['active', 'جارية', CHART_STATE_COLORS.active],
+            ['completed', 'مكتملة', CHART_STATE_COLORS.completed],
+            ['paused', 'متوقفة', CHART_STATE_COLORS.paused],
+            ['cancelled', 'ملغاة', CHART_STATE_COLORS.cancelled]
+          ]) }
+        ];
+      }
+      case 'course':
+        return [{ kind: 'donut', title: 'جلسات مجموعة التدريب حسب الحالة', items: itemsFromMetrics([
+          ['done', 'مكتملة', CHART_STATE_COLORS.done],
+          ['remaining', 'متبقية', CHART_STATE_COLORS.remaining],
+          ['cancelled', 'ملغاة', CHART_STATE_COLORS.cancelled]
+        ]) }];
+      case 'session':
+      case 'attendance':
+        return [{ kind: 'donut', title: 'توزيع الحضور', items: itemsFromMetrics([
+          ['present', 'موجود', CHART_ATT_COLORS.present],
+          ['absent', 'غائب', CHART_ATT_COLORS.absent],
+          ['excused', 'معتذر', CHART_ATT_COLORS.excused],
+          ['unrecorded', 'بلا تسجيل', CHART_ATT_COLORS.unrecorded]
+        ]) }];
+      case 'calendar':
+        // من المقاييس نفسها — صحيحة لأي نطاق يعرضه التقويم.
+        return [{ kind: 'bar', title: 'الجلسات والاجتماعات حسب الحالة', items: itemsFromMetrics([
+          ['done', 'مكتملة', CHART_STATE_COLORS.done],
+          ['scheduled', 'مجدولة', CHART_STATE_COLORS.scheduled],
+          ['cancelled', 'ملغاة', CHART_STATE_COLORS.cancelled],
+          ['trainerAbsent', 'غياب مدرب', CHART_STATE_COLORS.trainerAbsent],
+          ['holiday', 'عطلة', CHART_STATE_COLORS.holiday],
+          ['meetings', 'اجتماعات عارضة', CHART_STATE_COLORS.meetings]
+        ]) }];
+      case 'directory':
+        return [{ kind: 'bar', title: 'محتويات الدليل', items: itemsFromMetrics([
+          ['trainers', 'مدربون', ''],
+          ['trainees', 'متدربون', ''],
+          ['directorates', 'مديريات', ''],
+          ['groups', 'مجموعات تدريبية', ''],
+          ['halls', 'قاعات', '']
+        ]) }];
+      case 'trainees': {
+        var tr = computeTrainees();
+        return [{ kind: 'bar', title: 'المتدربون حسب المديرية', items: topItems(tr.rows || [], 'directorate', 'count', 6), format: 'num', unit: 'متدرب' }];
+      }
+      case 'trainers': {
+        var tn = computeTrainers();
+        return [{ kind: 'bar', title: 'الجلسات لكل مدرب', items: topItems(tn.rows || [], 'name', 'sessions', 6), format: 'num', unit: 'جلسة' }];
+      }
+      case 'directorates': {
+        var dr = computeDirectorates();
+        return [{ kind: 'bar', title: 'المتدربون لكل مديرية', items: topItems(dr.rows || [], 'name', 'trainees', 6), format: 'num', unit: 'متدرب' }];
+      }
+      case 'groups': {
+        var gr = computeGroups();
+        return [{ kind: 'bar', title: 'الأعضاء لكل مجموعة', items: topItems(gr.rows || [], 'name', 'members', 6), format: 'num', unit: 'عضو' }];
+      }
+      case 'halls': {
+        var ha = computeHalls();
+        return [{ kind: 'bar', title: 'الجلسات لكل قاعة', items: topItems(ha.rows || [], 'name', 'sessions', 6), format: 'num', unit: 'جلسة' }];
+      }
+      case 'periods': {
+        var pr = computePeriods();
+        return [{ kind: 'bar', title: 'الجلسات لكل فترة', items: topItems(pr.rows || [], 'label', 'sessions', 6), format: 'num', unit: 'جلسة' }];
+      }
+      case 'levels': {
+        var lv = computeLevels();
+        return [{ kind: 'bar', title: 'مجموعات التدريب لكل مستوى', items: topItems(lv.rows || [], 'level', 'courses', 6), format: 'num', unit: 'مجموعة تدريب' }];
+      }
+      case 'expenses': {
+        var ex = computeExpenses();
+        return [
+          { kind: 'donut', title: 'المصروف حسب الفئة', format: 'money', drill: 'expenses-category',
+            items: (ex.byCategory || []).map(function (r) { return { label: r.category, value: r.total }; }) },
+          { kind: 'bar', title: 'المصروف حسب مجموعة التدريب', format: 'money',
+            items: topItems(ex.byCourse || [], 'course', 'total', 6) }
+        ];
+      }
+      case 'budget':
+        return [{ kind: 'donut', title: 'الميزانية: المصروف مقابل المتبقي', format: 'money', items: [
+          { label: 'المصروف', value: m('spent'), color: '#1B4F72' },
+          { label: 'المتبقي', value: Math.max(0, m('remaining')), color: '#C9A86A' }
+        ] }];
+      case 'meetings':
+        return [{ kind: 'donut', title: 'الاجتماعات حسب الحالة', items: itemsFromMetrics([
+          ['scheduled', 'مجدولة', CHART_STATE_COLORS.scheduled],
+          ['cancelled', 'ملغاة', CHART_STATE_COLORS.cancelled]
+        ]) }];
+      case 'users':
+        return [{ kind: 'donut', title: 'المستخدمون حسب الدور', items: itemsFromMetrics([
+          ['admins', 'مدراء', '#081F31'],
+          ['editors', 'محررون', '#2E86AB'],
+          ['viewers', 'عارضون', '#7FB3D5']
+        ]) }];
+      default:
+        return [];
+    }
+  }
+
+  /* ----- رسم الرسم الواحد (HTML نصي؛ الأحداث بالتفويض في wireCharts) ----- */
+
+  // أعمدة أفقية: التسمية يميناً والأعمدة تنمو يساراً (RTL).
+  // viewBox ثابت 320 — يتقلص مع البطاقة بلا فيض أفقي.
+  var CHART_BAR_LABEL_X = 314, CHART_BAR_RIGHT = 204, CHART_BAR_MAXW = 170, CHART_BAR_ROW = 32;
+
+  function renderBarChart(cfg) {
+    var items = cfg.items || [];
+    var max = 1;
+    items.forEach(function (it) { max = Math.max(max, asNum(it.value)); });
+    var h = items.length * CHART_BAR_ROW + 8;
+    var html = '<svg class="chart-svg chart-svg-bar" viewBox="0 0 320 ' + h + '" role="img" aria-label="' + escapeHtml(cfg.title) + '">';
+    html += '<line x1="' + CHART_BAR_RIGHT + '" y1="4" x2="' + CHART_BAR_RIGHT + '" y2="' + (h - 4) + '" class="chart-axis" />';
+    items.forEach(function (it, i) {
+      var v = asNum(it.value);
+      var w = Math.max(2, Math.round((v / max) * CHART_BAR_MAXW));
+      var y = 4 + i * CHART_BAR_ROW;
+      var color = it.color || CHART_PALETTE[i % CHART_PALETTE.length];
+      var label = String(it.label || '');
+      var shortLabel = label.length > 13 ? label.slice(0, 12) + '…' : label;
+      var valText = fmtChartValueShort(cfg.format || 'num', v);
+      var fullText = fmtChartValue(cfg.format || 'num', v);
+      // القيمة داخل العمود إن اتسع، وإلا خارجه يساراً.
+      var inside = w >= 84;
+      var valX = inside ? CHART_BAR_RIGHT - 6 : CHART_BAR_RIGHT - w - 6;
+      var valCls = inside ? 'chart-value chart-value-in' : 'chart-value';
+      html += '<g class="chart-item chart-bar-row" data-chart-item="' + i + '" tabindex="0" role="button" aria-label="' + escapeHtml(label + ': ' + fullText) + '">' +
+        '<title>' + escapeHtml(label + ': ' + fullText) + '</title>' +
+        '<text x="' + CHART_BAR_LABEL_X + '" y="' + (y + 20) + '" class="chart-label" text-anchor="end">' + escapeHtml(shortLabel) + '</text>' +
+        '<rect class="chart-bar" x="' + (CHART_BAR_RIGHT - w) + '" y="' + (y + 6) + '" width="' + w + '" height="20" rx="4" fill="' + color + '" style="transition-delay:' + (i * 70) + 'ms" />' +
+        '<text x="' + valX + '" y="' + (y + 20) + '" class="' + valCls + '" text-anchor="end" style="transition-delay:' + (i * 70 + 150) + 'ms">' + escapeHtml(valText) + '</text>' +
+        '</g>';
+    });
+    html += '</svg>';
+    return html;
+  }
+
+  // دائري مجوّف: دوائر pathLength=100 + وسيلة إيضاح HTML قابلة للنقر.
+  // القيم النهائية للشرائح في متغيرات CSS (--fd/--fo) يفعّلها صنف chart-in.
+  function renderDonutChart(cfg) {
+    var items = cfg.items || [];
+    var total = 0;
+    items.forEach(function (it) { total += asNum(it.value); });
+    // نص الإجمالي في المنتصف: مختصر بلا عملة، وحجم خط يصغر مع
+    // طول النص حتى لا يفيض خارج ثقب الدائرة (قطره 90).
+    var centerText = fmtChartValueShort(cfg.format || 'num', total);
+    if (cfg.format === 'money') centerText = centerText.replace(' ل.س', '');
+    var centerSize = centerText.length > 9 ? 11 : (centerText.length > 6 ? 13 : 15);
+    var html = '<div class="chart-donut-wrap"><svg class="chart-svg chart-svg-donut" viewBox="0 0 150 150" role="img" aria-label="' + escapeHtml(cfg.title) + '">';
+    var start = 0;
+    items.forEach(function (it, i) {
+      var v = asNum(it.value);
+      var pctVal = total > 0 ? (v / total) * 100 : 0;
+      var color = it.color || CHART_PALETTE[i % CHART_PALETTE.length];
+      var gap = pctVal > 0 ? 0.8 : 0;
+      var len = Math.max(0, pctVal - gap);
+      var valText = fmtChartValue(cfg.format || 'num', v);
+      html += '<circle class="chart-item chart-seg" data-chart-item="' + i + '" tabindex="0" role="button" aria-label="' + escapeHtml(it.label + ': ' + valText) + '" cx="75" cy="75" r="58" fill="none" stroke="' + color + '" stroke-width="26" pathLength="100" transform="rotate(-90 75 75)" style="--fd:' + len.toFixed(2) + ' 100;--fo:' + (-start).toFixed(2) + ';transition-delay:' + (i * 90) + 'ms"><title>' + escapeHtml(it.label + ': ' + valText) + '</title></circle>';
+      start += pctVal;
+    });
+    html += '<text x="75" y="72" text-anchor="middle" class="chart-donut-total" style="font-size:' + centerSize + 'px">' + escapeHtml(centerText) + '</text>' +
+      '<text x="75" y="88" text-anchor="middle" class="chart-donut-total-label">الإجمالي</text></svg>';
+    html += '<ul class="chart-legend">';
+    items.forEach(function (it, i) {
+      var color = it.color || CHART_PALETTE[i % CHART_PALETTE.length];
+      html += '<li class="chart-item chart-legend-item" data-chart-item="' + i + '" tabindex="0" role="button"><span class="chart-dot" style="background:' + color + '"></span><span class="chart-legend-label">' + escapeHtml(it.label) + '</span><span class="chart-legend-value">' + escapeHtml(fmtChartValueShort(cfg.format || 'num', asNum(it.value))) + '</span></li>';
+    });
+    html += '</ul></div>';
+    return html;
+  }
+
+  // خطي: الزمن يجري من اليمين (الأقدم) إلى اليسار (الأحدث) — RTL.
+  function renderLineChart(cfg) {
+    var items = cfg.items || [];
+    var n = items.length;
+    var max = 1;
+    items.forEach(function (it) { max = Math.max(max, asNum(it.value)); });
+    var PL = 30, PR = 312, PT = 10, PB = 158;
+    var step = n > 1 ? (PR - PL) / (n - 1) : 0;
+    function px(i) { return PR - i * step; }
+    function py(v) { return PT + (PB - PT) * (1 - v / max); }
+    var pts = items.map(function (it, i) { return { x: px(i), y: py(asNum(it.value)) }; });
+    var linePath = pts.map(function (p, i) { return (i ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1); }).join(' ');
+    var areaPath = linePath + ' L' + pts[n - 1].x.toFixed(1) + ' ' + PB + ' L' + pts[0].x.toFixed(1) + ' ' + PB + ' Z';
+    var html = '<svg class="chart-svg chart-svg-line" viewBox="0 0 320 180" role="img" aria-label="' + escapeHtml(cfg.title) + '">';
+    [0, 0.5, 1].forEach(function (f) {
+      var y = PT + (PB - PT) * (1 - f);
+      html += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + PR + '" y2="' + y.toFixed(1) + '" class="chart-grid" />';
+      html += '<text x="' + (PL - 4) + '" y="' + (y + 3).toFixed(1) + '" class="chart-axis-label" text-anchor="end">' + Math.round(max * f) + '</text>';
+    });
+    html += '<path class="chart-area" d="' + areaPath + '" />';
+    html += '<path class="chart-line-path" d="' + linePath + '" fill="none" />';
+    var k = Math.max(1, Math.ceil(n / 6));
+    items.forEach(function (it, i) {
+      if (i % k !== 0 && i !== n - 1) return;
+      html += '<text x="' + px(i).toFixed(1) + '" y="174" class="chart-axis-label" text-anchor="middle">' + escapeHtml(it.short || it.label) + '</text>';
+    });
+    items.forEach(function (it, i) {
+      var valText = fmtChartValue(cfg.format || 'num', asNum(it.value));
+      html += '<g class="chart-item chart-point" data-chart-item="' + i + '" tabindex="0" role="button" aria-label="' + escapeHtml(it.label + ': ' + valText) + '" style="transition-delay:' + (i * 25 + 300) + 'ms">' +
+        '<title>' + escapeHtml(it.label + ': ' + valText) + '</title>' +
+        '<circle cx="' + pts[i].x.toFixed(1) + '" cy="' + pts[i].y.toFixed(1) + '" r="14" class="chart-hit" />' +
+        '<circle cx="' + pts[i].x.toFixed(1) + '" cy="' + pts[i].y.toFixed(1) + '" r="4" class="chart-dot-pt" /></g>';
+    });
+    html += '</svg>';
+    return html;
+  }
+
+  function chartBlockHtml(cfg, index) {
+    var items = cfg.items || [];
+    var hasData = items.some(function (it) { return asNum(it.value) > 0; });
+    var html = '<div class="chart-block" data-chart-block data-chart-index="' + index + '" data-chart-kind="' + cfg.kind + '"' +
+      (cfg.drill ? ' data-chart-drill="' + cfg.drill + '"' : '') + '>' +
+      '<h3 class="chart-title">' + escapeHtml(cfg.title) + '</h3>';
+    if (!hasData || !items.length) {
+      html += '<div class="muted chart-empty">لا بيانات كافية لعرض الرسم البياني.</div></div>';
+      return html;
+    }
+    if (cfg.kind === 'bar') html += renderBarChart(cfg);
+    else if (cfg.kind === 'donut') html += renderDonutChart(cfg);
+    else if (cfg.kind === 'line') html += renderLineChart(cfg);
+    html += '<div class="chart-detail" role="status">انقر على أي عنصر لعرض التفاصيل.</div>';
+    if (cfg.drill) html += '<div class="chart-drill" hidden></div>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderChartsHtml(configs) {
+    if (!configs || !configs.length) return '';
+    var html = '<div class="stats-charts">';
+    configs.forEach(function (cfg, i) { html += chartBlockHtml(cfg, i); });
+    html += '</div>';
+    return html;
+  }
+
+  /* ----- التفاعل والحركة ----- */
+
+  function chartDetailText(cfg, it) {
+    var text = it.label + ': ' + fmtChartValue(cfg.format || 'num', asNum(it.value));
+    if (cfg.unit) text += ' ' + cfg.unit;
+    if (cfg.kind === 'donut') {
+      var total = 0;
+      (cfg.items || []).forEach(function (x) { total += asNum(x.value); });
+      if (total > 0) text += ' (' + pct(asNum(it.value), total) + '%)';
+    }
+    return text;
+  }
+
+  function closeChartDrill(block) {
+    if (!block) return;
+    var drill = block.querySelector('.chart-drill');
+    if (drill) { drill.hidden = true; drill.innerHTML = ''; }
+  }
+
+  // التفصيل الوحيد: النقر على فئة مصروف يدرج مصاريفها (8 كحد أقصى).
+  function renderExpenseDrill(block, category) {
+    var drill = block.querySelector('.chart-drill');
+    if (!drill) return;
+    var rows = storeAll('expenses').filter(function (e) { return (e.category || 'بلا فئة') === category; })
+      .sort(function (a, b) { return (b.date || '') < (a.date || '') ? -1 : 1; });
+    var total = 0;
+    rows.forEach(function (e) { total += asNum(e.amount); });
+    var U = ui();
+    var html = '<div class="chart-drill-head"><strong>مصاريف فئة «' + escapeHtml(category) + '»</strong>' +
+      '<button class="btn btn-outline btn-sm" type="button" data-chart-drill-close>إغلاق</button></div>';
+    if (!rows.length) {
+      html += '<div class="muted">لا مصاريف في هذه الفئة.</div>';
+    } else {
+      html += '<ul class="chart-drill-list">';
+      rows.slice(0, 8).forEach(function (e) {
+        var dateText = e.date || '';
+        if (U && typeof U.fmtDateFull === 'function') { try { dateText = U.fmtDateFull(e.date); } catch (err) {} }
+        html += '<li><span class="chart-drill-desc">' + escapeHtml(e.description || '') + '</span>' +
+          '<span class="muted chart-drill-date">' + escapeHtml(dateText) + '</span>' +
+          '<span class="chart-drill-amount">' + escapeHtml(fmtChartValue('money', asNum(e.amount))) + '</span></li>';
+      });
+      html += '</ul>';
+      if (rows.length > 8) html += '<div class="muted">و' + (rows.length - 8) + ' مصروف آخر في هذه الفئة.</div>';
+      html += '<div class="chart-drill-total">الإجمالي: ' + escapeHtml(fmtChartValue('money', total)) + '</div>';
+    }
+    drill.innerHTML = html;
+    drill.hidden = false;
+  }
+
+  // معاينة عند التمرير: إبراز مؤقت (.hov) + عرض القيمة، بلا
+  // تحديد وبلا تفصيل — التحديد (.sel) بالنقر فقط، حتى لا يلغي
+  // التمريرُ النقرةَ التي تليه (التمرير يسبق النقر دائماً).
+  function previewChartItem(container, item) {
+    var block = item.closest ? item.closest('[data-chart-block]') : null;
+    if (!block) return;
+    var configs = container._statsCharts || [];
+    var cfg = configs[+block.getAttribute('data-chart-index')];
+    if (!cfg) return;
+    var idx = +item.getAttribute('data-chart-item');
+    var it = (cfg.items || [])[idx];
+    if (!it) return;
+    block.querySelectorAll('[data-chart-item].hov').forEach(function (el) { el.classList.remove('hov'); });
+    block.querySelectorAll('[data-chart-item="' + idx + '"]').forEach(function (el) { el.classList.add('hov'); });
+    var detail = block.querySelector('.chart-detail');
+    if (detail) detail.textContent = chartDetailText(cfg, it);
+  }
+
+  // استعادة سطر التفاصيل بعد مغادرة الرسم: قيمة المحدَّد بالنقر
+  // إن وُجد، وإلا النص الافتراضي.
+  function restoreChartDetail(container, block) {
+    if (!block) return;
+    block.querySelectorAll('[data-chart-item].hov').forEach(function (el) { el.classList.remove('hov'); });
+    var detail = block.querySelector('.chart-detail');
+    if (!detail) return;
+    var sel = block.querySelector('[data-chart-item].sel');
+    if (!sel) { detail.textContent = 'انقر على أي عنصر لعرض التفاصيل.'; return; }
+    var configs = container._statsCharts || [];
+    var cfg = configs[+block.getAttribute('data-chart-index')];
+    var it = cfg && (cfg.items || [])[+sel.getAttribute('data-chart-item')];
+    if (cfg && it) detail.textContent = chartDetailText(cfg, it);
+  }
+
+  function selectChartItem(container, item) {
+    var block = item.closest ? item.closest('[data-chart-block]') : null;
+    if (!block) return;
+    var configs = container._statsCharts || [];
+    var cfg = configs[+block.getAttribute('data-chart-index')];
+    if (!cfg) return;
+    var idx = +item.getAttribute('data-chart-item');
+    var it = (cfg.items || [])[idx];
+    if (!it) return;
+    var already = item.classList.contains('sel');
+    block.querySelectorAll('[data-chart-item].sel').forEach(function (el) { el.classList.remove('sel'); });
+    var detail = block.querySelector('.chart-detail');
+    if (already) {
+      if (detail) detail.textContent = 'انقر على أي عنصر لعرض التفاصيل.';
+      closeChartDrill(block);
+      return;
+    }
+    block.querySelectorAll('[data-chart-item="' + idx + '"]').forEach(function (el) { el.classList.add('sel'); });
+    if (detail) detail.textContent = chartDetailText(cfg, it);
+    if (cfg.drill === 'expenses-category') renderExpenseDrill(block, it.label);
+  }
+
+  function onChartEvent(container, e, kind) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (kind === 'click') {
+      var closeBtn = t.closest('[data-chart-drill-close]');
+      if (closeBtn) {
+        closeChartDrill(closeBtn.closest('[data-chart-block]'));
+        return;
+      }
+    }
+    var item = t.closest('[data-chart-item]');
+    if (!item) return;
+    if (kind === 'hover') {
+      var block = item.closest('[data-chart-block]');
+      var key = (block ? block.getAttribute('data-chart-index') : '?') + ':' + item.getAttribute('data-chart-item');
+      if (container._statsHoverKey === key) return;
+      container._statsHoverKey = key;
+      previewChartItem(container, item);
+      return;
+    }
+    selectChartItem(container, item);
+  }
+
+  // ربط أحداث الرسوم (تفويض على الحاوية — يبقى بعد إعادة رسم
+  // الرسوم) + تشغيل الحركة بإضافة صنف chart-in بعد الإطار الأول.
+  function wireCharts(container) {
+    if (!container || typeof document === 'undefined') return;
+    if (!container._statsChartsWired) {
+      container._statsChartsWired = true;
+      container.addEventListener('click', function (e) { onChartEvent(container, e, 'click'); });
+      container.addEventListener('mouseover', function (e) { onChartEvent(container, e, 'hover'); });
+      container.addEventListener('mouseout', function (e) {
+        var item = e.target && e.target.closest ? e.target.closest('[data-chart-item]') : null;
+        if (!item) return;
+        var block = item.closest('[data-chart-block]');
+        var rel = e.relatedTarget;
+        if (rel && rel.closest && rel.closest('[data-chart-block]') === block) return;
+        container._statsHoverKey = null;
+        restoreChartDetail(container, block);
+      });
+      container.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var item = e.target && e.target.closest ? e.target.closest('[data-chart-item]') : null;
+        if (!item) return;
+        e.preventDefault();
+        selectChartItem(container, item);
+      });
+    }
+    // الخط البياني: إخفاؤه أولاً (dashoffset = الطول) ثم رسمه
+    // تدريجياً عند تشغيل الحركة. عند reduced-motion لا انتقال
+    // فيظهر فوراً (انظر styles.css).
+    container.querySelectorAll('.chart-line-path:not([data-chart-prepped])').forEach(function (path) {
+      path.setAttribute('data-chart-prepped', '1');
+      try {
+        var len = path.getTotalLength();
+        path.style.strokeDasharray = String(len);
+        path.style.strokeDashoffset = String(len);
+      } catch (e) { /* بلا رسم تدريجي */ }
+    });
+    function animate() {
+      container.querySelectorAll('.chart-block:not(.chart-in)').forEach(function (block) {
+        block.classList.add('chart-in');
+      });
+      container.querySelectorAll('.chart-line-path[data-chart-prepped]').forEach(function (path) {
+        path.style.strokeDashoffset = '0';
+      });
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { requestAnimationFrame(animate); });
+    }
+    setTimeout(animate, 200);
+  }
+
+  // إعادة رسم رسوم لوحة مرسومة (بعد updateMetrics) — من المواصفات
+  // المحفوظة نفسها، بلا مساس ببطاقات المقاييس.
+  function refreshCharts(container) {
+    if (!container || !container._statsSpec) return;
+    var spec = container._statsSpec;
+    var configs = [];
+    try { configs = chartConfigs(spec.section || '', spec) || []; } catch (e) { configs = []; }
+    container._statsCharts = configs;
+    var wrap = container.querySelector('.stats-charts');
+    // حفظ التحديد الحالي قبل إعادة الرسم لاستعادته بعده (حتى لا
+    // يضيع اختيار المستخدم عند وصول مقياس غير متزامن).
+    var prevSel = {};
+    if (wrap) {
+      wrap.querySelectorAll('[data-chart-block]').forEach(function (b) {
+        var sel = b.querySelector('[data-chart-item].sel');
+        if (sel) prevSel[b.getAttribute('data-chart-index')] = sel.getAttribute('data-chart-item');
+      });
+    }
+    var html = renderChartsHtml(configs);
+    if (!html) {
+      if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      return;
+    }
+    if (wrap) {
+      wrap.outerHTML = html;
+    } else {
+      var panel = container.querySelector('.stats-panel');
+      if (panel) panel.insertAdjacentHTML('beforeend', html);
+    }
+    wireCharts(container);
+    Object.keys(prevSel).forEach(function (ci) {
+      var block = container.querySelector('[data-chart-block][data-chart-index="' + ci + '"]');
+      if (!block) return;
+      var item = block.querySelector('[data-chart-item="' + prevSel[ci] + '"]');
+      if (item) selectChartItem(container, item);
+    });
+  }
+
   /* ---------- عرض لوحة الإحصاءات ---------- */
 
   // حجم خط رقم البطاقة حسب طول النص — القيم الطويلة (مبالغ بفواصل
@@ -1709,7 +2294,7 @@
 
     var html = '<div class="card-white stats-panel" data-stats-section="' + escapeHtml(section) + '">' +
       '<div class="section-title-row"><h2 style="margin:0">' + escapeHtml(spec.title || 'إحصاءات') + '</h2>' +
-      '<div class="head-actions">' +
+      '<div class="head-actions tools-bar">' +
       '<button class="btn btn-outline btn-sm" type="button" data-stats-customize>تخصيص</button>';
     if (spec.export && typeof spec.export.onClick === 'function') {
       html += '<button class="btn btn-outline btn-sm" type="button" data-stats-export>' +
@@ -1732,9 +2317,16 @@
       });
       html += '</div>';
     }
+    // الرسوم البيانية التفاعلية (v2.3 — W5): تحت بطاقات المقاييس
+    // داخل اللوحة نفسها؛ بياناتها من compute* أو من المقاييس.
+    var chartCfgs = [];
+    try { chartCfgs = chartConfigs(section, spec) || []; } catch (e) { chartCfgs = []; }
+    container._statsCharts = chartCfgs;
+    html += renderChartsHtml(chartCfgs);
     html += '</div>';
 
     container.innerHTML = html;
+    wireCharts(container);
 
     var customizeBtn = container.querySelector('[data-stats-customize]');
     if (customizeBtn) {
@@ -1771,6 +2363,8 @@
         applyNumStyle(card, text);
       }
     });
+    // الرسوم تعتمد على المقاييس نفسها — تُحدَّث معها (v2.3 — W5).
+    refreshCharts(container);
   }
 
   // نافذة «تخصيص»: اختيار المقاييس الظاهرة في لوحة القسم.

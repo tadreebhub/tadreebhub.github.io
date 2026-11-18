@@ -605,6 +605,215 @@
     }
   }
 
+  // ---------- استيراد المتدربين من إكسل (v2.3 — M) ----------
+  // مسار مشترك لنموذج الدورة ونموذج المجموعة: يقرأ الملف عبر
+  // TadreebExport، وينشئ المتدربين الصالحين عبر TadreebDB.add
+  // (مع التدقيق التلقائي كالمسار اليدوي)، ثم يستدعي onAdded
+  // بالمعرّفات الجديدة بعد التحديث، ويعرض الملخص في summaryEl.
+  // opts: {summaryEl, buttonEl, existingPhones(), onAdded(ids)}
+  function traineeCountText(n) {
+    if (n === 0) return 'لم تتم إضافة أي متدرب';
+    if (n === 1) return 'تمت إضافة متدرب واحد';
+    if (n === 2) return 'تمت إضافة متدربين';
+    if (n <= 10) return 'تمت إضافة ' + n + ' متدربين';
+    return 'تمت إضافة ' + n + ' متدرباً';
+  }
+  function skippedCountText(n) {
+    if (n === 0) return 'بلا صفوف متخطاة';
+    if (n === 1) return 'وتُخطي صف واحد';
+    if (n === 2) return 'وتُخطي صفين';
+    if (n <= 10) return 'وتُخطي ' + n + ' صفوف';
+    return 'وتُخطي ' + n + ' صفاً';
+  }
+
+  // ملخص استيراد عام (v2.3 — N): المتدربون والمديريات يتشاركان
+  // الشكل نفسه (عدّ + صفوف متخطاة بأسبابها وأرقامها)؛ opts:
+  // {addedText(n), reasons}.
+  function renderImportSummary(el, result, opts) {
+    if (!el) return;
+    opts = opts || {};
+    var labels = opts.reasons || ((window.TadreebExport && window.TadreebExport.IMPORT_SKIP_REASONS) || {});
+    var addedText = opts.addedText || traineeCountText;
+    var added = result.added.length, skipped = result.skipped.length;
+    var html = '<div class="excel-import-counts"><span class="excel-import-added">' + addedText(added) + '</span>' +
+      ' — <span class="excel-import-skipped">' + skippedCountText(skipped) + '</span></div>';
+    if (skipped) {
+      html += '<ul>' + result.skipped.map(function (s) {
+        var who = s.name ? '«' + escapeHtml(s.name) + '»' : (s.phone ? escapeHtml(s.phone) : '');
+        return '<li>الصف ' + s.row + (who ? ' — ' + who : '') + ': ' + escapeHtml(labels[s.reason] || s.reason) + '</li>';
+      }).join('') + '</ul>';
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+  }
+
+  function renderTraineeImportSummary(el, result) {
+    renderImportSummary(el, result, {});
+  }
+
+  function directorateCountText(n) {
+    if (n === 0) return 'لم تتم إضافة أي مديرية';
+    if (n === 1) return 'تمت إضافة مديرية واحدة';
+    if (n === 2) return 'تمت إضافة مديريتين';
+    if (n <= 10) return 'تمت إضافة ' + n + ' مديريات';
+    return 'تمت إضافة ' + n + ' مديرية';
+  }
+
+  function renderDirectorateImportSummary(el, result) {
+    renderImportSummary(el, result, {
+      addedText: directorateCountText,
+      reasons: (window.TadreebExport && window.TadreebExport.IMPORT_DIRECTORATE_SKIP_REASONS) || {}
+    });
+  }
+
+  // N رمزاً متسلسلاً للمتدربين من nextCode الحالي (البادئة +
+  // اللاحقة الرقمية + العرض نفسه) — تُحسب دفعة واحدة لأن المتجر
+  // يتحدث لاحقاً عبر المستمعين، فإعادة حساب nextCode بعد كل إضافة
+  // قد تعطي الرمز نفسه مرتين.
+  function nextTraineeCodes(count) {
+    var codes = [];
+    var first = '';
+    try { first = window.App.nextCode('trainees') || ''; } catch (e) { first = ''; }
+    var m = /^(.*?)(\d+)$/.exec(first);
+    for (var i = 0; i < count; i++) {
+      if (!m) { codes.push(''); continue; }
+      var s = String(parseInt(m[2], 10) + i);
+      while (s.length < m[2].length) s = '0' + s;
+      codes.push(m[1] + s);
+    }
+    return codes;
+  }
+
+  // N رمزاً متسلسلاً لأي مجموعة (كما nextTraineeCodes للمتدربين).
+  function nextEntityCodes(collection, count) {
+    var codes = [];
+    var first = '';
+    try { first = window.App.nextCode(collection) || ''; } catch (e) { first = ''; }
+    var m = /^(.*?)(\d+)$/.exec(first);
+    for (var i = 0; i < count; i++) {
+      if (!m) { codes.push(''); continue; }
+      var s = String(parseInt(m[2], 10) + i);
+      while (s.length < m[2].length) s = '0' + s;
+      codes.push(m[1] + s);
+    }
+    return codes;
+  }
+
+  // ---------- استيراد المديريات من إكسل (v2.3 — N) ----------
+  // مسار موازٍ لاستيراد المتدربين: يقرأ الملف عبر TadreebExport،
+  // وينشئ المديريات الصالحة عبر TadreebDB.add (مع التدقيق التلقائي
+  // كالمسار اليدوي)، ثم يستدعي onAdded بالمعرّفات الجديدة ونتيجة
+  // التحليل، ويعرض الملخص في summaryEl.
+  // opts: {summaryEl, buttonEl, existingNames(), onAdded(ids, result)}
+  function runDirectorateExcelImport(file, opts) {
+    opts = opts || {};
+    var summaryEl = opts.summaryEl || null;
+    var buttonEl = opts.buttonEl || null;
+    if (!file || !/\.xlsx$/i.test(file.name || '')) {
+      toast('اختر ملف إكسل بصيغة xlsx.', 'error');
+      return Promise.resolve(null);
+    }
+    if (!window.TadreebExport || typeof window.TadreebExport.importDirectoratesFromFile !== 'function' ||
+        !window.TadreebDB || !window.App) {
+      toast('وظيفة الاستيراد غير متوفرة حالياً', 'error');
+      return Promise.resolve(null);
+    }
+    if (buttonEl) { buttonEl.disabled = true; }
+    if (summaryEl) {
+      summaryEl.innerHTML = '<div class="excel-import-counts">جارٍ استيراد الملف…</div>';
+      summaryEl.hidden = false;
+    }
+    var existing = [];
+    try { existing = (typeof opts.existingNames === 'function') ? (opts.existingNames() || []) : []; } catch (e) { existing = []; }
+    return window.TadreebExport.importDirectoratesFromFile(file, existing).then(function (result) {
+      if (!result.added.length) {
+        renderDirectorateImportSummary(summaryEl, result);
+        if (buttonEl) buttonEl.disabled = false;
+        return result;
+      }
+      var codes = nextEntityCodes('directorates', result.added.length);
+      var newIds = [];
+      var chain = Promise.resolve();
+      result.added.forEach(function (d, i) {
+        chain = chain.then(function () {
+          return window.TadreebDB.add('directorates', {
+            name: d.name,
+            code: codes[i]
+          }).then(function (id) { newIds.push(id); });
+        });
+      });
+      return chain.then(function () {
+        var rp = window.App.refresh ? window.App.refresh() : null;
+        return Promise.resolve(rp).then(function () {
+          if (typeof opts.onAdded === 'function') opts.onAdded(newIds, result);
+          renderDirectorateImportSummary(summaryEl, result);
+          if (buttonEl) buttonEl.disabled = false;
+          return result;
+        });
+      });
+    }).catch(function (err) {
+      if (buttonEl) buttonEl.disabled = false;
+      toastError(err);
+      throw err;
+    });
+  }
+
+  function runTraineeExcelImport(file, opts) {
+    opts = opts || {};
+    var summaryEl = opts.summaryEl || null;
+    var buttonEl = opts.buttonEl || null;
+    if (!file || !/\.xlsx$/i.test(file.name || '')) {
+      toast('اختر ملف إكسل بصيغة xlsx.', 'error');
+      return Promise.resolve(null);
+    }
+    if (!window.TadreebExport || typeof window.TadreebExport.importTraineesFromFile !== 'function' ||
+        !window.TadreebDB || !window.App) {
+      toast('وظيفة الاستيراد غير متوفرة حالياً', 'error');
+      return Promise.resolve(null);
+    }
+    if (buttonEl) { buttonEl.disabled = true; }
+    if (summaryEl) {
+      summaryEl.innerHTML = '<div class="excel-import-counts">جارٍ استيراد الملف…</div>';
+      summaryEl.hidden = false;
+    }
+    var existing = [];
+    try { existing = (typeof opts.existingPhones === 'function') ? (opts.existingPhones() || []) : []; } catch (e) { existing = []; }
+    return window.TadreebExport.importTraineesFromFile(file, existing).then(function (result) {
+      if (!result.added.length) {
+        renderTraineeImportSummary(summaryEl, result);
+        if (buttonEl) buttonEl.disabled = false;
+        return result;
+      }
+      var codes = nextTraineeCodes(result.added.length);
+      var newIds = [];
+      var chain = Promise.resolve();
+      result.added.forEach(function (t, i) {
+        chain = chain.then(function () {
+          return window.TadreebDB.add('trainees', {
+            name: t.name,
+            code: codes[i],
+            directorateId: null,
+            phone: t.phone,
+            notes: ''
+          }).then(function (id) { newIds.push(id); });
+        });
+      });
+      return chain.then(function () {
+        var rp = window.App.refresh ? window.App.refresh() : null;
+        return Promise.resolve(rp).then(function () {
+          if (typeof opts.onAdded === 'function') opts.onAdded(newIds);
+          renderTraineeImportSummary(summaryEl, result);
+          if (buttonEl) buttonEl.disabled = false;
+          return result;
+        });
+      });
+    }).catch(function (err) {
+      if (buttonEl) buttonEl.disabled = false;
+      toastError(err);
+      throw err;
+    });
+  }
+
   window.UI = {
     LEVANT_MONTHS: LEVANT_MONTHS,
     WEEKDAYS: WEEKDAYS,
@@ -649,6 +858,10 @@
     hasExport: hasExport,
     callExport: callExport,
     openPicker: openPicker,
+    runTraineeExcelImport: runTraineeExcelImport,
+    renderTraineeImportSummary: renderTraineeImportSummary,
+    runDirectorateExcelImport: runDirectorateExcelImport,
+    renderDirectorateImportSummary: renderDirectorateImportSummary,
     SETTING_DEFAULTS: SETTING_DEFAULTS,
     getSetting: getSetting,
     setSetting: setSetting
